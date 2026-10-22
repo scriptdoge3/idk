@@ -12,23 +12,6 @@
 #include <asm/system.h>
 #include <asm/segment.h>
 
-#define get_seg_byte(seg,addr) ({ \
-register char __res; \
-__asm__("push %%fs;mov %%ax,%%fs;movb %%fs:%2,%%al;pop %%fs" \
-	:"=a" (__res):"0" (seg),"m" (*(addr))); \
-__res;})
-
-#define get_seg_long(seg,addr) ({ \
-register unsigned long __res; \
-__asm__("push %%fs;mov %%ax,%%fs;movl %%fs:%2,%%eax;pop %%fs" \
-	:"=a" (__res):"0" (seg),"m" (*(addr))); \
-__res;})
-
-#define _fs() ({ \
-register unsigned short __res; \
-__asm__("mov %%fs,%%ax":"=a" (__res):); \
-__res;})
-
 int do_exit(long code);
 
 void page_exception(void);
@@ -49,122 +32,115 @@ void stack_segment(void);
 void general_protection(void);
 void page_fault(void);
 void coprocessor_error(void);
+void simd_error(void);
 void reserved(void);
 
-static void die(char * str,long esp_ptr,long nr)
+/*
+ * 64-bit port: the registers come as a struct regs (asm.s). A fault in
+ * user mode still costs the process a SIGSEGV after the register dump,
+ * as in 1991. One in the kernel is a kernel bug: dump and stop.
+ */
+void die(char * str,struct regs * regs,long nr)
 {
-	long * esp = (long *) esp_ptr;
 	int i;
 
-	printk("%s: %04x\n\r",str,nr&0xffff);
-	printk("EIP:\t%04x:%p\nEFLAGS:\t%p\nESP:\t%04x:%p\n",
-		esp[1],esp[0],esp[2],esp[4],esp[3]);
-	printk("fs: %04x\n",_fs());
-	printk("base: %p, limit: %p\n",get_base(current->ldt[1]),get_limit(0x17));
-	if (esp[4] == 0x17) {
-		printk("Stack: ");
-		for (i=0;i<4;i++)
-			printk("%p ",get_seg_long(0x17,i+(long *)esp[3]));
-		printk("\n");
+	printk("%s: %04x\n\r",str,(int) nr&0xffff);
+	printk("RIP: %04x:%p  RFLAGS: %p  RSP: %04x:%p\n\r",
+		(int) regs->cs,regs->rip,regs->rflags,(int) regs->ss,regs->rsp);
+	printk("RAX: %p RBX: %p RCX: %p RDX: %p\n\r",
+		regs->rax,regs->rbx,regs->rcx,regs->rdx);
+	printk("RSI: %p RDI: %p RBP: %p\n\r",regs->rsi,regs->rdi,regs->rbp);
+	printk("Pid: %d, cr3: %p\n\r",(int) current->pid,current->cr3);
+	if (regs->rip < TASK_SIZE || regs->rip >= KERNEL_BASE) {
+		for(i=0;i<10;i++)
+			printk("%02x ",0xff & ((regs->cs & 3) ?
+				get_fs_byte(i+(char *)regs->rip) :
+				*(i+(char *)regs->rip)));
+		printk("\n\r");
 	}
-	str(i);
-	printk("Pid: %d, process nr: %d\n\r",current->pid,0xffff & i);
-	for(i=0;i<10;i++)
-		printk("%02x ",0xff & get_seg_byte(esp[1],(i+(char *)esp[0])));
-	printk("\n\r");
+	if (!(regs->cs & 3))
+		panic("kernel fault");
 	do_exit(11);		/* play segment exception */
 }
 
-void do_double_fault(long esp, long error_code)
+void do_double_fault(struct regs * regs, long error_code)
 {
-	die("double fault",esp,error_code);
+	die("double fault",regs,error_code);
 }
 
-void do_general_protection(long esp, long error_code)
+void do_general_protection(struct regs * regs, long error_code)
 {
-	die("general protection",esp,error_code);
+	die("general protection",regs,error_code);
 }
 
-void do_divide_error(long esp, long error_code)
+void do_divide_error(struct regs * regs, long error_code)
 {
-	die("divide error",esp,error_code);
+	die("divide error",regs,error_code);
 }
 
-void do_int3(long * esp, long error_code,
-		long fs,long es,long ds,
-		long ebp,long esi,long edi,
-		long edx,long ecx,long ebx,long eax)
+void do_int3(struct regs * regs, long error_code)
 {
-	int tr;
-
-	__asm__("str %%ax":"=a" (tr):"0" (0));
-	printk("eax\t\tebx\t\tecx\t\tedx\n\r%8x\t%8x\t%8x\t%8x\n\r",
-		eax,ebx,ecx,edx);
-	printk("esi\t\tedi\t\tebp\t\tesp\n\r%8x\t%8x\t%8x\t%8x\n\r",
-		esi,edi,ebp,(long) esp);
-	printk("\n\rds\tes\tfs\ttr\n\r%4x\t%4x\t%4x\t%4x\n\r",
-		ds,es,fs,tr);
-	printk("EIP: %8x   CS: %4x  EFLAGS: %8x\n\r",esp[0],esp[1],esp[2]);
+	printk("rax\t\trbx\t\trcx\t\trdx\n\r%p\t%p\t%p\t%p\n\r",
+		regs->rax,regs->rbx,regs->rcx,regs->rdx);
+	printk("rsi\t\trdi\t\trbp\t\trsp\n\r%p\t%p\t%p\t%p\n\r",
+		regs->rsi,regs->rdi,regs->rbp,regs->rsp);
+	printk("RIP: %p   CS: %4x  RFLAGS: %p\n\r",regs->rip,
+		(int) regs->cs,regs->rflags);
 }
 
-void do_nmi(long esp, long error_code)
+void do_nmi(struct regs * regs, long error_code)
 {
-	die("nmi",esp,error_code);
+	die("nmi",regs,error_code);
 }
 
-void do_debug(long esp, long error_code)
+void do_debug(struct regs * regs, long error_code)
 {
-	die("debug",esp,error_code);
+	die("debug",regs,error_code);
 }
 
-void do_overflow(long esp, long error_code)
+void do_overflow(struct regs * regs, long error_code)
 {
-	die("overflow",esp,error_code);
+	die("overflow",regs,error_code);
 }
 
-void do_bounds(long esp, long error_code)
+void do_bounds(struct regs * regs, long error_code)
 {
-	die("bounds",esp,error_code);
+	die("bounds",regs,error_code);
 }
 
-void do_invalid_op(long esp, long error_code)
+void do_invalid_op(struct regs * regs, long error_code)
 {
-	die("invalid operand",esp,error_code);
+	die("invalid operand",regs,error_code);
 }
 
-void do_device_not_available(long esp, long error_code)
+void do_coprocessor_segment_overrun(struct regs * regs, long error_code)
 {
-	die("device not available",esp,error_code);
+	die("coprocessor segment overrun",regs,error_code);
 }
 
-void do_coprocessor_segment_overrun(long esp, long error_code)
+void do_invalid_TSS(struct regs * regs,long error_code)
 {
-	die("coprocessor segment overrun",esp,error_code);
+	die("invalid TSS",regs,error_code);
 }
 
-void do_invalid_TSS(long esp,long error_code)
+void do_segment_not_present(struct regs * regs,long error_code)
 {
-	die("invalid TSS",esp,error_code);
+	die("segment not present",regs,error_code);
 }
 
-void do_segment_not_present(long esp,long error_code)
+void do_stack_segment(struct regs * regs,long error_code)
 {
-	die("segment not present",esp,error_code);
+	die("stack segment",regs,error_code);
 }
 
-void do_stack_segment(long esp,long error_code)
+void do_coprocessor_error(struct regs * regs, long error_code)
 {
-	die("stack segment",esp,error_code);
+	die("coprocessor error",regs,error_code);
 }
 
-void do_coprocessor_error(long esp, long error_code)
+void do_reserved(struct regs * regs, long error_code)
 {
-	die("coprocessor error",esp,error_code);
-}
-
-void do_reserved(long esp, long error_code)
-{
-	die("reserved (15,17-31) error",esp,error_code);
+	die("reserved (15,17-31) error",regs,error_code);
 }
 
 void trap_init(void)
@@ -179,7 +155,7 @@ void trap_init(void)
 	set_system_gate(5,&bounds);
 	set_trap_gate(6,&invalid_op);
 	set_trap_gate(7,&device_not_available);
-	set_trap_gate(8,&double_fault);
+	set_ist_gate(8,&double_fault,1);	/* on a stack of its own */
 	set_trap_gate(9,&coprocessor_segment_overrun);
 	set_trap_gate(10,&invalid_TSS);
 	set_trap_gate(11,&segment_not_present);
@@ -190,6 +166,7 @@ void trap_init(void)
 	set_trap_gate(16,&coprocessor_error);
 	for (i=17;i<32;i++)
 		set_trap_gate(i,&reserved);
+	set_trap_gate(19,&simd_error);
 /*	__asm__("movl $0x3ff000,%%eax\n\t"
 		"movl %%eax,%%db0\n\t"
 		"movl $0x000d0303,%%eax\n\t"

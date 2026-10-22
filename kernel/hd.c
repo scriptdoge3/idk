@@ -66,14 +66,14 @@ static void rw_abs_hd(int rw,unsigned int nr,unsigned int sec,unsigned int head,
 void hd_init(void);
 
 #define port_read(port,buf,nr) do { \
-int __d0, __d1; \
+long __d0, __d1; \
 __asm__ volatile ("cld;rep;insw" \
 	:"=&D" (__d0),"=&c" (__d1) \
 	:"d" (port),"0" (buf),"1" (nr):"memory"); \
 } while (0)
 
 #define port_write(port,buf,nr) do { \
-int __d0, __d1; \
+long __d0, __d1; \
 __asm__ volatile ("cld;rep;outsw" \
 	:"=&S" (__d0),"=&c" (__d1) \
 	:"d" (port),"0" (buf),"1" (nr):"memory"); \
@@ -125,7 +125,7 @@ void rw_hd(int rw, struct buffer_head * bh)
 }
 
 /* This may be used only once, enforced by 'static int callable' */
-int sys_setup(void)
+long sys_setup(void)
 {
 	static int callable = 1;
 	int i,drive;

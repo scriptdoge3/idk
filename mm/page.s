@@ -1,35 +1,23 @@
 /*
  * page.s contains the low-level page-exception code.
  * the real work is done in mm.c
+ *
+ * 64-bit port: do_page_fault() (memory.c) gets the saved registers, the
+ * error code and the faulting address from %cr2, and decides between
+ * do_no_page() and do_wp_page() as this code did.
  */
+
+	.include "asm/regs.inc"
 
 .globl _page_fault
 
 _page_fault:
-	xchgl %eax,(%esp)
-	pushl %ecx
-	pushl %edx
-	push %ds
-	push %es
-	push %fs
-	movl $0x10,%edx
-	mov %dx,%ds
-	mov %dx,%es
-	mov %dx,%fs
-	movl %cr2,%edx
-	pushl %edx
-	pushl %eax
-	testl $1,%eax
-	jne 1f
-	cld
-	call _do_no_page
-	jmp 2f
-1:	call _do_wp_page
-2:	addl $8,%esp
-	pop %fs
-	pop %es
-	pop %ds
-	popl %edx
-	popl %ecx
-	popl %eax
-	iret
+	pushq $0			# alignment (the cpu pushed an error code)
+	SAVE_REGS
+	movq %rsp,%rdi
+	movq ERRCODE(%rsp),%rsi
+	movq %cr2,%rdx
+	call _do_page_fault
+	RESTORE_REGS
+	addq $16,%rsp
+	iretq

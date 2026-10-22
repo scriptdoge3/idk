@@ -7,7 +7,7 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
-extern int sys_close(int fd);
+extern long sys_close(int fd);
 
 static int dupfd(unsigned int fd, unsigned int arg)
 {
@@ -27,18 +27,18 @@ static int dupfd(unsigned int fd, unsigned int arg)
 	return arg;
 }
 
-int sys_dup2(unsigned int oldfd, unsigned int newfd)
+long sys_dup2(unsigned int oldfd, unsigned int newfd)
 {
 	sys_close(newfd);
 	return dupfd(oldfd,newfd);
 }
 
-int sys_dup(unsigned int fildes)
+long sys_dup(unsigned int fildes)
 {
 	return dupfd(fildes,0);
 }
 
-int sys_fcntl(unsigned int fd, unsigned int cmd, unsigned long arg)
+long sys_fcntl(unsigned int fd, unsigned int cmd, unsigned long arg)
 {	
 	struct file * filp;
 

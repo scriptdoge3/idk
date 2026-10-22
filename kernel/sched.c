@@ -21,7 +21,7 @@ extern int system_call(void);
 
 union task_union {
 	struct task_struct task;
-	char stack[PAGE_SIZE];
+	char stack[TASK_BLOCK];
 };
 
 static union task_union init_task = {INIT_TASK,};
@@ -32,24 +32,36 @@ struct task_struct *current = &(init_task.task), *last_task_used_math = NULL;
 
 struct task_struct * task[NR_TASKS] = {&(init_task.task), };
 
-long user_stack [ PAGE_SIZE>>2 ] ;
+/*
+ * 1991's task 0 ran in user mode on user_stack. 64-bit port: it stays
+ * in the kernel, on the stack in its own task_union, which head.s
+ * loads from here.
+ */
+char * stack_start = init_task.stack + TASK_BLOCK;
 
-struct {
-	long * a;
-	short b;
-	} stack_start = { & user_stack [PAGE_SIZE>>2] , 0x10 };
+struct tss_struct tss;
+static unsigned long double_fault_stack[512];
+
 /*
  *  'math_state_restore()' saves the current math information in the
  * old math state array, and gets the new ones from the current task
+ *
+ * 64-bit port: the device-not-available trap comes here directly (TS is
+ * set by switch_task). fxsave/fxrstor cover the fpu and sse registers.
  */
 void math_state_restore()
 {
+	static unsigned int mxcsr = 0x1f80;	/* all sse exceptions masked */
+
+	__asm__ volatile ("clts");
+	if (last_task_used_math == current)
+		return;
 	if (last_task_used_math)
-		__asm__ volatile ("fnsave %0":"=m" (last_task_used_math->tss.i387));
+		__asm__ volatile ("fxsave %0":"=m" (last_task_used_math->fxsave));
 	if (current->used_math)
-		__asm__("frstor %0"::"m" (current->tss.i387));
+		__asm__ volatile ("fxrstor %0"::"m" (current->fxsave));
 	else {
-		__asm__("fninit"::);
+		__asm__ volatile ("fninit ; ldmxcsr %0"::"m" (mxcsr));
 		current->used_math=1;
 	}
 	last_task_used_math=current;
@@ -104,7 +116,7 @@ void schedule(void)
 	switch_to(next);
 }
 
-int sys_pause(void)
+long sys_pause(void)
 {
 	current->state = TASK_INTERRUPTIBLE;
 	schedule();
@@ -168,50 +180,50 @@ void do_timer(long cpl)
 	schedule();
 }
 
-int sys_alarm(long seconds)
+long sys_alarm(long seconds)
 {
 	current->alarm = (seconds>0)?(jiffies+HZ*seconds):0;
 	return seconds;
 }
 
-int sys_getpid(void)
+long sys_getpid(void)
 {
 	return current->pid;
 }
 
-int sys_getppid(void)
+long sys_getppid(void)
 {
 	return current->father;
 }
 
-int sys_getuid(void)
+long sys_getuid(void)
 {
 	return current->uid;
 }
 
-int sys_geteuid(void)
+long sys_geteuid(void)
 {
 	return current->euid;
 }
 
-int sys_getgid(void)
+long sys_getgid(void)
 {
 	return current->gid;
 }
 
-int sys_getegid(void)
+long sys_getegid(void)
 {
 	return current->egid;
 }
 
-int sys_nice(long increment)
+long sys_nice(long increment)
 {
 	if (current->priority-increment>0)
 		current->priority -= increment;
 	return 0;
 }
 
-int sys_signal(long signal,long addr,long restorer)
+long sys_signal(long signal,long addr,long restorer)
 {
 	long i;
 
@@ -228,23 +240,26 @@ int sys_signal(long signal,long addr,long restorer)
 	}
 }
 
+/*
+ * 64-bit port: one tss for everybody. Its rsp0 is where the cpu puts
+ * the stack on an interrupt from user mode; switch_task keeps it at the
+ * top of the current task's kernel stack.
+ */
 void sched_init(void)
 {
 	int i;
-	struct desc_struct * p;
+	unsigned long base = (unsigned long) &tss, limit = sizeof(tss)-1;
 
-	set_tss_desc(gdt+FIRST_TSS_ENTRY,&(init_task.task.tss));
-	set_ldt_desc(gdt+FIRST_LDT_ENTRY,&(init_task.task.ldt));
-	p = gdt+2+FIRST_TSS_ENTRY;
-	for(i=1;i<NR_TASKS;i++) {
+	for(i=1;i<NR_TASKS;i++)
 		task[i] = NULL;
-		p->a=p->b=0;
-		p++;
-		p->a=p->b=0;
-		p++;
-	}
-	ltr(0);
-	lldt(0);
+	tss.rsp0 = (unsigned long) stack_start;
+	tss.ist[0] = (unsigned long) (double_fault_stack+512);
+	tss.iomap_base = sizeof(tss);	/* no io bitmap: no ports for users */
+	tss_desc[0] = (limit & 0xffff) | ((base & 0xffffff) << 16) |
+		(0x89UL << 40) | (((limit >> 16) & 0xf) << 48) |
+		(((base >> 24) & 0xff) << 56);
+	tss_desc[1] = base >> 32;
+	__asm__ volatile ("ltr %%ax"::"a" (TSS_SEL));
 	outb_p(0x36,0x43);		/* binary, mode 3, LSB/MSB, ch 0 */
 	outb_p(LATCH & 0xff , 0x40);	/* LSB */
 	outb(LATCH >> 8 , 0x40);	/* MSB */
@@ -252,3 +267,16 @@ void sched_init(void)
 	outb(inb_p(0x21)&~0x01,0x21);
 	set_system_gate(0x80,&system_call);
 }
+
+/* the assembly code knows these (asm/regs.inc): fail to compile if wrong */
+#define ASM_OFFSET(name,cond) typedef char name[(cond) ? 1 : -1]
+ASM_OFFSET(check_signal,__builtin_offsetof(struct task_struct,signal) == 24);
+ASM_OFFSET(check_ksp,__builtin_offsetof(struct task_struct,ksp) == 32);
+ASM_OFFSET(check_cr3,__builtin_offsetof(struct task_struct,cr3) == 40);
+ASM_OFFSET(check_regs,sizeof(struct regs) == 0xb0 &&
+	__builtin_offsetof(struct regs,rax) == 0x70 &&
+	__builtin_offsetof(struct regs,cs) == 0x90);
+ASM_OFFSET(check_rsp0,__builtin_offsetof(struct tss_struct,rsp0) == 4 &&
+	sizeof(struct tss_struct) == 104);
+ASM_OFFSET(check_block,TASK_BLOCK == 8192 &&
+	sizeof(struct task_struct) <= TASK_BLOCK/2);

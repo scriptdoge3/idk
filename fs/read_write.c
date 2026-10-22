@@ -16,7 +16,7 @@ extern int file_read(struct m_inode * inode, struct file * filp,
 extern int file_write(struct m_inode * inode, struct file * filp,
 		char * buf, int count);
 
-int sys_lseek(unsigned int fd,off_t offset, int origin)
+long sys_lseek(unsigned int fd,off_t offset, int origin)
 {
 	struct file * file;
 	int tmp;
@@ -46,7 +46,7 @@ int sys_lseek(unsigned int fd,off_t offset, int origin)
 	return file->f_pos;
 }
 
-int sys_read(unsigned int fd,char * buf,int count)
+long sys_read(unsigned int fd,char * buf,int count)
 {
 	struct file * file;
 	struct m_inode * inode;
@@ -74,7 +74,7 @@ int sys_read(unsigned int fd,char * buf,int count)
 	return -EINVAL;
 }
 
-int sys_write(unsigned int fd,char * buf,int count)
+long sys_write(unsigned int fd,char * buf,int count)
 {
 	struct file * file;
 	struct m_inode * inode;

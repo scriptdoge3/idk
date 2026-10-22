@@ -16,7 +16,7 @@ int read_pipe(struct m_inode * inode, char * buf, int count)
 	}
 	while (count>0 && !(PIPE_EMPTY(*inode))) {
 		count --;
-		put_fs_byte(((char *)inode->i_size)[PIPE_TAIL(*inode)],b++);
+		put_fs_byte(inode->i_pipe_buf[PIPE_TAIL(*inode)],b++);
 		INC_PIPE( PIPE_TAIL(*inode) );
 	}
 	wake_up(&inode->i_wait);
@@ -41,7 +41,7 @@ int write_pipe(struct m_inode * inode, char * buf, int count)
 			}
 			sleep_on(&inode->i_wait);
 		}
-		((char *)inode->i_size)[PIPE_HEAD(*inode)] = get_fs_byte(b++);
+		inode->i_pipe_buf[PIPE_HEAD(*inode)] = get_fs_byte(b++);
 		INC_PIPE( PIPE_HEAD(*inode) );
 		wake_up(&inode->i_wait);
 	}
@@ -49,7 +49,7 @@ int write_pipe(struct m_inode * inode, char * buf, int count)
 	return b-buf;
 }
 
-int sys_pipe(unsigned long * fildes)
+long sys_pipe(unsigned long * fildes)
 {
 	struct m_inode * inode;
 	struct file * f[2];
@@ -86,7 +86,7 @@ int sys_pipe(unsigned long * fildes)
 	f[0]->f_pos = f[1]->f_pos = 0;
 	f[0]->f_mode = 1;		/* read */
 	f[1]->f_mode = 2;		/* write */
-	put_fs_long(fd[0],0+fildes);
-	put_fs_long(fd[1],1+fildes);
+	put_fs_int(fd[0],0+(unsigned int *)fildes);
+	put_fs_int(fd[1],1+(unsigned int *)fildes);
 	return 0;
 }

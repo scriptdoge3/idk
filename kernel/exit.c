@@ -7,8 +7,8 @@
 #include <linux/tty.h>
 #include <asm/segment.h>
 
-int sys_pause(void);
-int sys_close(int fd);
+long sys_pause(void);
+long sys_close(int fd);
 
 void release(struct task_struct * p)
 {
@@ -19,7 +19,9 @@ void release(struct task_struct * p)
 	for (i=1 ; i<NR_TASKS ; i++)
 		if (task[i]==p) {
 			task[i]=NULL;
+			free_page((long)p->pml4);
 			free_page((long)p);
+			free_page(PAGE_SIZE+(long)p);
 			schedule();
 			return;
 		}
@@ -55,7 +57,7 @@ void do_kill(long pid,long sig,int priv)
 			send_sig(sig,*p,priv);
 }
 
-int sys_kill(int pid,int sig)
+long sys_kill(int pid,int sig)
 {
 	do_kill(pid,sig,!(current->uid || current->euid));
 	return 0;
@@ -65,8 +67,9 @@ int do_exit(long code)
 {
 	int i;
 
-	free_page_tables(get_base(current->ldt[1]),get_limit(0x0f));
-	free_page_tables(get_base(current->ldt[2]),get_limit(0x17));
+	if (current == task[0])
+		panic("task[0] trying to exit");
+	free_page_tables(current->pml4);
 	for (i=0 ; i<NR_TASKS ; i++)
 		if (task[i] && task[i]->father == current->pid)
 			task[i]->father = 0;
@@ -91,12 +94,12 @@ int do_exit(long code)
 	return (-1);	/* just to suppress warnings */
 }
 
-int sys_exit(int error_code)
+long sys_exit(int error_code)
 {
 	return do_exit((error_code&0xff)<<8);
 }
 
-int sys_waitpid(pid_t pid,int * stat_addr, int options)
+long sys_waitpid(pid_t pid,int * stat_addr, int options)
 {
 	int flag=0;
 	struct task_struct ** p;
@@ -111,8 +114,8 @@ repeat:
 			if ((*p)->father == current->pid) {
 				flag=1;
 				if ((*p)->state==TASK_ZOMBIE) {
-					put_fs_long((*p)->exit_code,
-						(unsigned long *) stat_addr);
+					put_fs_int((*p)->exit_code,
+						(unsigned int *) stat_addr);
 					current->cutime += (*p)->utime;
 					current->cstime += (*p)->stime;
 					flag = (*p)->pid;

@@ -1,6 +1,13 @@
 /*
  *	keyboard.s
+ *
+ * 64-bit port: the logic is unchanged; pointers and the jump table are
+ * 64 bits wide, and so are the tty_queue fields (offsets below).
  */
+
+	.include "asm/regs.inc"
+
+KERNEL_BASE	= 0xffffffff80000000
 
 .text
 .globl _keyboard_interrupt
@@ -10,10 +17,10 @@
  */
 size	= 1024		/* must be a power of two ! And MUST be the same
 			   as in tty_io.c !!!! */
-head = 4
-tail = 8
-proc_list = 12
-buf = 16
+head = 8
+tail = 16
+proc_list = 24
+buf = 32
 
 mode:	.byte 0		/* caps, alt, ctrl and shift mode */
 leds:	.byte 2		/* num-lock, caps, scroll-lock mode (nom-lock on) */
@@ -25,23 +32,16 @@ e0:	.byte 0
  *  ascii character(s).
  */
 _keyboard_interrupt:
-	pushl %eax
-	pushl %ebx
-	pushl %ecx
-	pushl %edx
-	push %ds
-	push %es
-	movl $0x10,%eax
-	mov %ax,%ds
-	mov %ax,%es
+	pushq $0
+	pushq $0
+	SAVE_REGS
 	xorl %eax,%eax		/* %eax is scan code */
 	inb $0x60,%al
 	cmpb $0xe0,%al
 	je set_e0
 	cmpb $0xe1,%al
 	je set_e1
-	cld
-	call *key_table(,%eax,4)
+	call *key_table(,%rax,8)
 	movb $0,e0
 e0_e1:	inb $0x61,%al
 	jmp 1f
@@ -56,17 +56,11 @@ e0_e1:	inb $0x61,%al
 	outb %al,$0x61
 	movb $0x20,%al
 	outb %al,$0x20
-	pushl $0
-	cld
+	xorl %edi,%edi
 	call _do_tty_interrupt
-	addl $4,%esp
-	pop %es
-	pop %ds
-	popl %edx
-	popl %ecx
-	popl %ebx
-	popl %eax
-	iret
+	RESTORE_REGS
+	addq $16,%rsp
+	iretq
 set_e0:	movb $1,e0
 	jmp e0_e1
 set_e1:	movb $2,e0
@@ -78,26 +72,26 @@ set_e1:	movb $2,e0
  * order %al,%ah,%eal,%eah,%bl,%bh ... until %eax is zero.
  */
 put_queue:
-	pushl %ecx
-	pushl %edx
-	movl _table_list,%edx		# read-queue for console
-	movl head(%edx),%ecx
-1:	movb %al,buf(%edx,%ecx)
+	pushq %rcx
+	pushq %rdx
+	movq _table_list,%rdx		# read-queue for console
+	movq head(%rdx),%rcx
+1:	movb %al,buf(%rdx,%rcx)
 	incl %ecx
 	andl $size-1,%ecx
-	cmpl tail(%edx),%ecx		# buffer full - discard everything
+	cmpq tail(%rdx),%rcx		# buffer full - discard everything
 	je 3f
 	shrdl $8,%ebx,%eax
 	je 2f
 	shrl $8,%ebx
 	jmp 1b
-2:	movl %ecx,head(%edx)
-	movl proc_list(%edx),%ecx
-	testl %ecx,%ecx
+2:	movq %rcx,head(%rdx)
+	movq proc_list(%rdx),%rcx
+	testq %rcx,%rcx
 	je 3f
-	movl $0,(%ecx)
-3:	popl %edx
-	popl %ecx
+	movq $0,(%rcx)
+3:	popq %rdx
+	popq %rcx
 	ret
 
 ctrl:	movb $0x04,%al
@@ -175,11 +169,11 @@ cur2:	cmpb $0x01,e0		/* e0 forces cursor movement */
 	testb $0x03,mode	/* shift forces cursor */
 	jne cur
 	xorl %ebx,%ebx
-	movb num_table(%eax),%al
+	movb num_table(%rax),%al
 	jmp put_queue
 1:	ret
 
-cur:	movb cur_table(%eax),%al
+cur:	movb cur_table(%rax),%al
 	cmpb $'9,%al
 	ja ok_cur
 	movb $'~,%ah
@@ -209,7 +203,7 @@ func:
 ok_func:
 	cmpl $4,%ecx		/* check that there is enough room */
 	jl end_func
-	movl func_table(,%eax,4),%eax
+	movl func_table(,%rax,4),%eax
 	xorl %ebx,%ebx
 	jmp put_queue
 end_func:
@@ -316,14 +310,14 @@ alt_map:
  * and which have just one character returns.
  */
 do_self:
-	lea alt_map,%ebx
+	lea alt_map,%rbx
 	testb $0x20,mode		/* alt-gr */
 	jne 1f
-	lea shift_map,%ebx
+	lea shift_map,%rbx
 	testb $0x03,mode
 	jne 1f
-	lea key_map,%ebx
-1:	movb (%ebx,%eax),%al
+	lea key_map,%rbx
+1:	movb (%rbx,%rax),%al
 	orb %al,%al
 	je none
 	testb $0x4c,mode		/* ctrl or caps */
@@ -366,81 +360,81 @@ minus:	cmpb $1,e0
  * they are make or break.
  */
 key_table:
-	.long none,do_self,do_self,do_self	/* 00-03 s0 esc 1 2 */
-	.long do_self,do_self,do_self,do_self	/* 04-07 3 4 5 6 */
-	.long do_self,do_self,do_self,do_self	/* 08-0B 7 8 9 0 */
-	.long do_self,do_self,do_self,do_self	/* 0C-0F + ' bs tab */
-	.long do_self,do_self,do_self,do_self	/* 10-13 q w e r */
-	.long do_self,do_self,do_self,do_self	/* 14-17 t y u i */
-	.long do_self,do_self,do_self,do_self	/* 18-1B o p } ^ */
-	.long do_self,ctrl,do_self,do_self	/* 1C-1F enter ctrl a s */
-	.long do_self,do_self,do_self,do_self	/* 20-23 d f g h */
-	.long do_self,do_self,do_self,do_self	/* 24-27 j k l | */
-	.long do_self,do_self,lshift,do_self	/* 28-2B { para lshift , */
-	.long do_self,do_self,do_self,do_self	/* 2C-2F z x c v */
-	.long do_self,do_self,do_self,do_self	/* 30-33 b n m , */
-	.long do_self,minus,rshift,do_self	/* 34-37 . - rshift * */
-	.long alt,do_self,caps,func		/* 38-3B alt sp caps f1 */
-	.long func,func,func,func		/* 3C-3F f2 f3 f4 f5 */
-	.long func,func,func,func		/* 40-43 f6 f7 f8 f9 */
-	.long func,num,scroll,cursor		/* 44-47 f10 num scr home */
-	.long cursor,cursor,do_self,cursor	/* 48-4B up pgup - left */
-	.long cursor,cursor,do_self,cursor	/* 4C-4F n5 right + end */
-	.long cursor,cursor,cursor,cursor	/* 50-53 dn pgdn ins del */
-	.long none,none,do_self,func		/* 54-57 sysreq ? < f11 */
-	.long func,none,none,none		/* 58-5B f12 ? ? ? */
-	.long none,none,none,none		/* 5C-5F ? ? ? ? */
-	.long none,none,none,none		/* 60-63 ? ? ? ? */
-	.long none,none,none,none		/* 64-67 ? ? ? ? */
-	.long none,none,none,none		/* 68-6B ? ? ? ? */
-	.long none,none,none,none		/* 6C-6F ? ? ? ? */
-	.long none,none,none,none		/* 70-73 ? ? ? ? */
-	.long none,none,none,none		/* 74-77 ? ? ? ? */
-	.long none,none,none,none		/* 78-7B ? ? ? ? */
-	.long none,none,none,none		/* 7C-7F ? ? ? ? */
-	.long none,none,none,none		/* 80-83 ? br br br */
-	.long none,none,none,none		/* 84-87 br br br br */
-	.long none,none,none,none		/* 88-8B br br br br */
-	.long none,none,none,none		/* 8C-8F br br br br */
-	.long none,none,none,none		/* 90-93 br br br br */
-	.long none,none,none,none		/* 94-97 br br br br */
-	.long none,none,none,none		/* 98-9B br br br br */
-	.long none,unctrl,none,none		/* 9C-9F br unctrl br br */
-	.long none,none,none,none		/* A0-A3 br br br br */
-	.long none,none,none,none		/* A4-A7 br br br br */
-	.long none,none,unlshift,none		/* A8-AB br br unlshift br */
-	.long none,none,none,none		/* AC-AF br br br br */
-	.long none,none,none,none		/* B0-B3 br br br br */
-	.long none,none,unrshift,none		/* B4-B7 br br unrshift br */
-	.long unalt,none,uncaps,none		/* B8-BB unalt br uncaps br */
-	.long none,none,none,none		/* BC-BF br br br br */
-	.long none,none,none,none		/* C0-C3 br br br br */
-	.long none,none,none,none		/* C4-C7 br br br br */
-	.long none,none,none,none		/* C8-CB br br br br */
-	.long none,none,none,none		/* CC-CF br br br br */
-	.long none,none,none,none		/* D0-D3 br br br br */
-	.long none,none,none,none		/* D4-D7 br br br br */
-	.long none,none,none,none		/* D8-DB br ? ? ? */
-	.long none,none,none,none		/* DC-DF ? ? ? ? */
-	.long none,none,none,none		/* E0-E3 e0 e1 ? ? */
-	.long none,none,none,none		/* E4-E7 ? ? ? ? */
-	.long none,none,none,none		/* E8-EB ? ? ? ? */
-	.long none,none,none,none		/* EC-EF ? ? ? ? */
-	.long none,none,none,none		/* F0-F3 ? ? ? ? */
-	.long none,none,none,none		/* F4-F7 ? ? ? ? */
-	.long none,none,none,none		/* F8-FB ? ? ? ? */
-	.long none,none,none,none		/* FC-FF ? ? ? ? */
+	.quad none,do_self,do_self,do_self	/* 00-03 s0 esc 1 2 */
+	.quad do_self,do_self,do_self,do_self	/* 04-07 3 4 5 6 */
+	.quad do_self,do_self,do_self,do_self	/* 08-0B 7 8 9 0 */
+	.quad do_self,do_self,do_self,do_self	/* 0C-0F + ' bs tab */
+	.quad do_self,do_self,do_self,do_self	/* 10-13 q w e r */
+	.quad do_self,do_self,do_self,do_self	/* 14-17 t y u i */
+	.quad do_self,do_self,do_self,do_self	/* 18-1B o p } ^ */
+	.quad do_self,ctrl,do_self,do_self	/* 1C-1F enter ctrl a s */
+	.quad do_self,do_self,do_self,do_self	/* 20-23 d f g h */
+	.quad do_self,do_self,do_self,do_self	/* 24-27 j k l | */
+	.quad do_self,do_self,lshift,do_self	/* 28-2B { para lshift , */
+	.quad do_self,do_self,do_self,do_self	/* 2C-2F z x c v */
+	.quad do_self,do_self,do_self,do_self	/* 30-33 b n m , */
+	.quad do_self,minus,rshift,do_self	/* 34-37 . - rshift * */
+	.quad alt,do_self,caps,func		/* 38-3B alt sp caps f1 */
+	.quad func,func,func,func		/* 3C-3F f2 f3 f4 f5 */
+	.quad func,func,func,func		/* 40-43 f6 f7 f8 f9 */
+	.quad func,num,scroll,cursor		/* 44-47 f10 num scr home */
+	.quad cursor,cursor,do_self,cursor	/* 48-4B up pgup - left */
+	.quad cursor,cursor,do_self,cursor	/* 4C-4F n5 right + end */
+	.quad cursor,cursor,cursor,cursor	/* 50-53 dn pgdn ins del */
+	.quad none,none,do_self,func		/* 54-57 sysreq ? < f11 */
+	.quad func,none,none,none		/* 58-5B f12 ? ? ? */
+	.quad none,none,none,none		/* 5C-5F ? ? ? ? */
+	.quad none,none,none,none		/* 60-63 ? ? ? ? */
+	.quad none,none,none,none		/* 64-67 ? ? ? ? */
+	.quad none,none,none,none		/* 68-6B ? ? ? ? */
+	.quad none,none,none,none		/* 6C-6F ? ? ? ? */
+	.quad none,none,none,none		/* 70-73 ? ? ? ? */
+	.quad none,none,none,none		/* 74-77 ? ? ? ? */
+	.quad none,none,none,none		/* 78-7B ? ? ? ? */
+	.quad none,none,none,none		/* 7C-7F ? ? ? ? */
+	.quad none,none,none,none		/* 80-83 ? br br br */
+	.quad none,none,none,none		/* 84-87 br br br br */
+	.quad none,none,none,none		/* 88-8B br br br br */
+	.quad none,none,none,none		/* 8C-8F br br br br */
+	.quad none,none,none,none		/* 90-93 br br br br */
+	.quad none,none,none,none		/* 94-97 br br br br */
+	.quad none,none,none,none		/* 98-9B br br br br */
+	.quad none,unctrl,none,none		/* 9C-9F br unctrl br br */
+	.quad none,none,none,none		/* A0-A3 br br br br */
+	.quad none,none,none,none		/* A4-A7 br br br br */
+	.quad none,none,unlshift,none		/* A8-AB br br unlshift br */
+	.quad none,none,none,none		/* AC-AF br br br br */
+	.quad none,none,none,none		/* B0-B3 br br br br */
+	.quad none,none,unrshift,none		/* B4-B7 br br unrshift br */
+	.quad unalt,none,uncaps,none		/* B8-BB unalt br uncaps br */
+	.quad none,none,none,none		/* BC-BF br br br br */
+	.quad none,none,none,none		/* C0-C3 br br br br */
+	.quad none,none,none,none		/* C4-C7 br br br br */
+	.quad none,none,none,none		/* C8-CB br br br br */
+	.quad none,none,none,none		/* CC-CF br br br br */
+	.quad none,none,none,none		/* D0-D3 br br br br */
+	.quad none,none,none,none		/* D4-D7 br br br br */
+	.quad none,none,none,none		/* D8-DB br ? ? ? */
+	.quad none,none,none,none		/* DC-DF ? ? ? ? */
+	.quad none,none,none,none		/* E0-E3 e0 e1 ? ? */
+	.quad none,none,none,none		/* E4-E7 ? ? ? ? */
+	.quad none,none,none,none		/* E8-EB ? ? ? ? */
+	.quad none,none,none,none		/* EC-EF ? ? ? ? */
+	.quad none,none,none,none		/* F0-F3 ? ? ? ? */
+	.quad none,none,none,none		/* F4-F7 ? ? ? ? */
+	.quad none,none,none,none		/* F8-FB ? ? ? ? */
+	.quad none,none,none,none		/* FC-FF ? ? ? ? */
 
 /*
  * kb_wait waits for the keyboard controller buffer to empty.
  * there is no timeout - if the buffer doesn't empty, we hang.
  */
 kb_wait:
-	pushl %eax
+	pushq %rax
 1:	inb $0x64,%al
 	testb $0x02,%al
 	jne 1b
-	popl %eax
+	popq %rax
 	ret
 /*
  * This routine reboots the machine by asking the keyboard
@@ -449,7 +443,7 @@ kb_wait:
 reboot:
 	cld
 	call kb_wait
-	movw $0x1234,0x472	/* don't do memory check */
+	movw $0x1234,KERNEL_BASE+0x472	/* don't do memory check */
 	movb $0xfc,%al		/* pulse reset and A20 low */
 	outb %al,$0x64
 die:	jmp die

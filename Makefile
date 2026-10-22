@@ -60,9 +60,9 @@ FORCE:
 
 # SYSSIZE is the kernel size in 16-byte clicks, rounded up.
 boot/boot:	boot/boot.s tools/system.bin
-	$(AS) --defsym SYSSIZE=$$(( ($$(stat -c %s tools/system.bin) + 15) / 16 )) \
+	$(AS16) --defsym SYSSIZE=$$(( ($$(stat -c %s tools/system.bin) + 15) / 16 )) \
 		-o boot/boot.o boot/boot.s
-	$(LD) -Ttext 0 -e start --oformat binary -o boot/boot boot/boot.o
+	$(LD16) -Ttext 0 -e start --oformat binary -o boot/boot boot/boot.o
 
 #
 # Root file system: a hard disk image with one Minix partition holding
@@ -79,9 +79,11 @@ hd.img: FORCE
 		--secs $(HD_SECS) --devices userland/devices \
 		-o hd.img userland/build/rootfs
 
-QEMU	=qemu-system-i386
+QEMU	=qemu-system-x86_64
 QEMUEXTRA=
-QEMUFLAGS=-m 16 -boot a $(QEMUEXTRA) -drive file=Image,if=floppy,format=raw \
+# guest memory; anything over 4G puts processes' pages above 4Gb
+MEM	=512M
+QEMUFLAGS=-m $(MEM) -boot a $(QEMUEXTRA) -drive file=Image,if=floppy,format=raw \
 	-drive file=hd.img,if=none,id=hd0,format=raw \
 	-device ide-hd,drive=hd0,bus=ide.0,cyls=$(HD_CYLS),heads=$(HD_HEADS),secs=$(HD_SECS)
 
@@ -91,8 +93,9 @@ run: Image hd.img
 run-curses: Image hd.img
 	$(QEMU) $(QEMUFLAGS) -display curses
 
+TESTMEM	=6G
 test: Image hd.img
-	python3 tools/smoketest.py --qemu $(QEMU) \
+	python3 tools/smoketest.py --qemu $(QEMU) --mem $(TESTMEM) \
 		--geometry $(HD_CYLS),$(HD_HEADS),$(HD_SECS)
 
 clean:

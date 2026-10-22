@@ -3,27 +3,18 @@
 #include <time.h>
 
 /*
- * we need this inline - forking from kernel space will result
- * in NO COPY ON WRITE (!!!), until an execve is executed. This
- * is no problem, but for the stack. This is handled by not letting
- * main() use the stack at all after fork(). Thus, no function
- * calls - which means inline code for fork too, as otherwise we
- * would use the stack upon exit from 'fork()'.
+ * 1991: "we need this inline - forking from kernel space will result
+ * in NO COPY ON WRITE (!!!), until an execve is executed." Task 0 went
+ * to user mode and forked init, both running this file's code.
  *
- * Actually only pause and fork are needed inline, so that there
- * won't be any messing with the stack from main(), but we define
- * some others too.
+ * 64-bit port: kernel code can't run in user mode any more (no segments
+ * to make the kernel's memory a user's), so task 0 stays in the kernel
+ * as the idle task, and init is started as a kernel task that execs
+ * /bin/init. The fork-and-respawn loop that was here lives there now.
+ * init uses these system calls from kernel mode, by int $0x80 as ever.
  */
-/*
- * Modern port: "static" after the prototypes in unistd.h is now an error,
- * and plain "inline" is only a hint. extern inline + always_inline gets
- * back what this needs: inlined, never called.
- */
-#define __always_inline extern inline __attribute__((always_inline))
-__always_inline _syscall0(int,fork)
-__always_inline _syscall0(int,pause)
 static inline _syscall0(int,setup)
-__always_inline _syscall0(int,sync)
+extern inline __attribute__((always_inline)) _syscall0(int,pause)
 
 #include <linux/tty.h>
 #include <linux/sched.h>
@@ -46,6 +37,8 @@ extern void init(void);
 extern void hd_init(void);
 extern long kernel_mktime(struct tm * tm);
 extern long startup_time;
+extern int start_kernel_task(void (*fn)(void));
+extern void calc_mem(void);
 
 /*
  * Yeah, yeah, it's ugly, but I cannot find how to do this correctly
@@ -91,25 +84,29 @@ void main(void)		/* This really IS void, no error here. */
  * Interrupts are still disabled. Do necessary setups, then
  * enable them
  */
+	mem_init();
 	time_init();
 	tty_init();
 	trap_init();
 	sched_init();
 	buffer_init();
 	hd_init();
+	pml4[0] = 0;	/* head.s's identity map: that's user space now */
+	__asm__ volatile ("movq %%rax,%%cr3"::"a" (current->cr3):"memory");
 	sti();
-	move_to_user_mode();
-	if (!fork()) {		/* we count on this going ok */
-		init();
-	}
+	calc_mem();
+	if (start_kernel_task(init) < 0)
+		panic("Can't start init");
 /*
- *   NOTE!!   For any other task 'pause()' would mean we have to get a
- * signal to awaken, but task0 is the sole exception (see 'schedule()')
- * as task 0 gets activated at every idle moment (when no other tasks
- * can run). For task0 'pause()' just means we go check if some other
- * task can run, and if not we return here.
+ *   NOTE!!   Task 0 gets activated at every idle moment (when no
+ * other tasks can run). 1991's task 0 did that with 'pause()'; here
+ * it checks if some other task can run, and if not waits for the next
+ * interrupt.
  */
-	for(;;) pause();
+	for(;;) {
+		schedule();
+		__asm__ volatile ("hlt");
+	}
 }
 
 static int printf(const char *fmt, ...)
@@ -124,40 +121,21 @@ static int printf(const char *fmt, ...)
 }
 
 static char * argv[] = { "-",NULL };
+static char * init_argv[] = { "init",NULL };
 static char * envp[] = { "HOME=/usr/root", NULL };
 
 void init(void)
 {
-	int i,j,pid;
-
 	setup();
-	if (!fork())
-		_exit(execve("/bin/update",NULL,NULL));
 	(void) open("/dev/tty0",O_RDWR,0);
 	(void) dup(0);
 	(void) dup(0);
 	printf("%d buffers = %d bytes buffer space\n\r",NR_BUFFERS,
 		NR_BUFFERS*BLOCK_SIZE);
 	printf(" Ok.\n\r");
-/*
- * Modern port: like Linux 0.11, start a new shell when the old one
- * exits instead of leaving a dead machine.
- */
-	for (;;) {
-		if ((pid=fork())<0) {
-			printf("Fork failed in init\r\n");
-			continue;
-		} else if (!pid) {
-			close(0);close(1);close(2);
-			setsid();
-			(void) open("/dev/tty0",O_RDWR,0);
-			(void) dup(0);
-			(void) dup(0);
-			_exit(execve("/bin/sh",argv,envp));
-		}
-		while ((j=wait(&i)) != pid && j != -1)
-			/* e.g. /bin/update */ ;
-		printf("child %d died with code %04x\n\r",j,i);
-		sync();
-	}
+	execve("/bin/init",init_argv,envp);
+	execve("/bin/sh",argv,envp);	/* no init: just a shell, then */
+	printf("No /bin/init or /bin/sh to run\n\r");
+	for (;;)
+		pause();
 }

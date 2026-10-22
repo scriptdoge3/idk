@@ -52,17 +52,18 @@ static int permission(struct m_inode * inode,int mask)
  */
 static int match(int len,const char * name,struct dir_entry * de)
 {
-	int same, __d0, __d1, __d2;
+	int same;
+	long __d0, __d1, __d2;
 
 	if (!de || !de->inode || len > NAME_LEN)
 		return 0;
 	if (len < NAME_LEN && de->name[len])
 		return 0;
 	__asm__("cld\n\t"
-		"fs ; repe ; cmpsb\n\t"
+		"repe ; cmpsb\n\t"
 		"setz %%al"
 		:"=a" (same),"=&S" (__d0),"=&D" (__d1),"=&c" (__d2)
-		:"0" (0),"1" ((long) name),"2" ((long) de->name),"3" (len)
+		:"0" (0),"1" ((long) name),"2" ((long) de->name),"3" ((long) len)
 		:"memory");
 	return same;
 }
@@ -378,7 +379,7 @@ int open_namei(const char * pathname, int flag, int mode,
 	return 0;
 }
 
-int sys_mkdir(const char * pathname, int mode)
+long sys_mkdir(const char * pathname, int mode)
 {
 	const char * basename;
 	int namelen;
@@ -502,7 +503,7 @@ static int empty_dir(struct m_inode * inode)
 	return 1;
 }
 
-int sys_rmdir(const char * name)
+long sys_rmdir(const char * name)
 {
 	const char * basename;
 	int namelen;
@@ -566,7 +567,7 @@ int sys_rmdir(const char * name)
 	return 0;
 }
 
-int sys_unlink(const char * name)
+long sys_unlink(const char * name)
 {
 	const char * basename;
 	int namelen;
@@ -618,7 +619,7 @@ int sys_unlink(const char * name)
 	return 0;
 }
 
-int sys_link(const char * oldname, const char * newname)
+long sys_link(const char * oldname, const char * newname)
 {
 	struct dir_entry * de;
 	struct m_inode * oldinode, * dir;

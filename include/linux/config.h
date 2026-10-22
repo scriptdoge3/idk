@@ -12,24 +12,15 @@
 #define QEMU_HD
 
 /*
- * Amount of ram memory (in bytes, 640k-1M not discounted). Currently 8Mb.
- * Don't make this bigger without making sure that there are enough page
- * directory entries (boot/head.s)
+ * 1991: "Amount of ram memory (in bytes, 640k-1M not discounted).
+ * Currently 8Mb." and a fixed BUFFER_END.
+ *
+ * 64-bit port: the memory size comes from the BIOS (boot.s asks for the
+ * e820 map) and mm/memory.c picks the buffer cache size. MAX_MEMORY
+ * caps what is used: mem_map needs 2 bytes per 4kB page, so 64Gb costs
+ * 32Mb of it. Must be a multiple of 1Gb, at most 512Gb.
  */
-#if	defined(LINUS_HD) || defined(QEMU_HD)
-#define HIGH_MEMORY (0x800000)
-#elif	defined(LASU_HD)
-#define HIGH_MEMORY (0x400000)
-#else
-#error "must define hd"
-#endif
-
-/* End of buffer memory. Must be 0xA0000, or > 0x100000, 4096-byte aligned */
-#if (HIGH_MEMORY>=0x600000)
-#define BUFFER_END 0x200000
-#else
-#define BUFFER_END 0xA0000
-#endif
+#define MAX_MEMORY	(64UL<<30)
 
 /* Root device at bootup. */
 #if	defined(QEMU_HD)

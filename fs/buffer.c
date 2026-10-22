@@ -11,13 +11,11 @@
 #include <linux/kernel.h>
 #include <asm/system.h>
 
-#if (BUFFER_END & 0xfff)
-#error "Bad BUFFER_END value"
-#endif
-
-#if (BUFFER_END > 0xA0000 && BUFFER_END <= 0x100000)
-#error "Bad BUFFER_END value"
-#endif
+/*
+ * 64-bit port: BUFFER_END is buffer_end now, set by mem_init() from the
+ * memory size; the buffers are reached through the kernel's mapping of
+ * low memory (LOW()). The 640kB-1Mb hole is skipped as before.
+ */
 
 extern int end;
 struct buffer_head * start_buffer = (struct buffer_head *) &end;
@@ -34,7 +32,7 @@ static inline void wait_on_buffer(struct buffer_head * bh)
 	sti();
 }
 
-int sys_sync(void)
+long sys_sync(void)
 {
 	int i;
 	struct buffer_head * bh;
@@ -231,7 +229,7 @@ struct buffer_head * bread(int dev,int block)
 void buffer_init(void)
 {
 	struct buffer_head * h = start_buffer;
-	void * b = (void *) BUFFER_END;
+	void * b = (void *) LOW(buffer_end);
 	int i;
 
 	while ( (b -= BLOCK_SIZE) >= ((void *) (h+1)) ) {
@@ -248,8 +246,8 @@ void buffer_init(void)
 		h->b_next_free = h+1;
 		h++;
 		NR_BUFFERS++;
-		if (b == (void *) 0x100000)
-			b = (void *) 0xA0000;
+		if (b == (void *) LOW(0x100000))
+			b = (void *) LOW(0xA0000);
 	}
 	h--;
 	free_list = start_buffer;

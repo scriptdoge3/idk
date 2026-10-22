@@ -84,6 +84,24 @@ go:	mov	%cs,%ax
 	mov	$0x1301,%ax		# write string, move cursor
 	int	$0x10
 
+# 64-bit port: ask the BIOS for its memory map (int 0x15, eax=0xe820)
+# and leave it for the kernel: the entry count at 0x90600, then the
+# 20-byte entries from 0x90608. main() copies it before anything else.
+
+	movw	$0,0x600
+	xor	%ebx,%ebx
+	mov	$0x608,%di
+e820:	mov	$0xe820,%eax
+	mov	$20,%ecx
+	mov	$0x534d4150,%edx	# 'SMAP'
+	int	$0x15
+	jc	1f
+	add	$20,%di
+	incw	0x600
+	test	%ebx,%ebx
+	jnz	e820
+1:
+
 # ok, we've written the message, now
 # we want to load the system (at 0x10000)
 

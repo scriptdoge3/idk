@@ -26,8 +26,9 @@
 #include <asm/io.h>
 #include <asm/system.h>
 
-#define SCREEN_START 0xb8000
-#define SCREEN_END   0xc0000
+/* 64-bit port: video memory through the kernel's map of low memory */
+#define SCREEN_START LOW(0xb8000)
+#define SCREEN_END   LOW(0xc0000)
 #define LINES 25
 #define COLUMNS 80
 #define NPAR 16
@@ -80,11 +81,11 @@ static void scrup(void)
 		pos += columns<<1;
 		scr_end += columns<<1;
 		if (scr_end>SCREEN_END) {
-			int __d0, __d1, __d2;
+			long __d0, __d1, __d2;
 			__asm__ volatile ("cld\n\t"
 				"rep\n\t"
 				"movsl\n\t"
-				"movl %[cols],%0\n\t"
+				"movq %[cols],%0\n\t"
 				"rep\n\t"
 				"stosw"
 				:"=&c" (__d0),"=&D" (__d1),"=&S" (__d2)
@@ -98,7 +99,7 @@ static void scrup(void)
 			pos -= origin-SCREEN_START;
 			origin = SCREEN_START;
 		} else {
-			int __d0, __d1;
+			long __d0, __d1;
 			__asm__ volatile ("cld\n\t"
 				"rep\n\t"
 				"stosl"
@@ -110,11 +111,11 @@ static void scrup(void)
 		}
 		set_origin();
 	} else {
-		int __d0, __d1, __d2;
+		long __d0, __d1, __d2;
 		__asm__ volatile ("cld\n\t"
 			"rep\n\t"
 			"movsl\n\t"
-			"movl %[cols],%%ecx\n\t"
+			"movq %[cols],%%rcx\n\t"
 			"rep\n\t"
 			"stosw"
 			:"=&c" (__d0),"=&D" (__d1),"=&S" (__d2)
@@ -129,12 +130,12 @@ static void scrup(void)
 
 static void scrdown(void)
 {
-	int __d0, __d1, __d2, __d3;
+	long __d0, __d1, __d2, __d3;
 	__asm__ volatile ("std\n\t"
 		"rep\n\t"
 		"movsl\n\t"
 		"addl $2,%%edi\n\t"	/* %edi has been decremented by 4 */
-		"movl %[cols],%%ecx\n\t"
+		"movq %[cols],%%rcx\n\t"
 		"rep\n\t"
 		"stosw\n\t"
 		"cld"
@@ -186,7 +187,7 @@ static void csi_J(int par)
 {
 	long count;
 	long start;
-	int __d0, __d1;
+	long __d0, __d1;
 
 	switch (par) {
 		case 0:	/* erase from cursor to end of display */
@@ -217,7 +218,7 @@ static void csi_K(int par)
 {
 	long count;
 	long start;
-	int __d0, __d1;
+	long __d0, __d1;
 
 	switch (par) {
 		case 0:	/* erase from cursor to end of line */
@@ -416,7 +417,7 @@ void con_write(struct tty_struct * tty)
 						pos -= columns<<1;
 						lf();
 					}
-					int __d0;
+					long __d0;
 					__asm__ volatile ("movb %[attr],%%ah\n\t"
 						"movw %%ax,%1\n\t"
 						:"=&a" (__d0),"=m" (*(short *)pos)
@@ -575,7 +576,7 @@ void con_init(void)
 {
 	register unsigned char a;
 
-	gotoxy(*(unsigned char *)(0x90000+510),*(unsigned char *)(0x90000+511));
+	gotoxy(*(unsigned char *)LOW(0x90000+510),*(unsigned char *)LOW(0x90000+511));
 	set_intr_gate(0x21,&keyboard_interrupt);
 	outb_p(inb_p(0x21)&0xfd,0x21);
 	a=inb_p(0x61);

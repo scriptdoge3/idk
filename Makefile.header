@@ -12,20 +12,25 @@
 
 TOPDIR	:= $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 
-AS	=as --32 --noexecstack
-LD	=ld -m elf_i386
+# 64-bit port: x86-64 code, linked at KERNEL_BASE (-mcmodel=kernel), no
+# red zone (interrupts push onto the kernel stack) and no fpu/sse use in
+# the kernel (user processes own those registers; see math_state_restore)
+AS	=as --64 --noexecstack -I$(TOPDIR)/include
+AS16	=as --32 --noexecstack
+LD	=ld -m elf_x86_64
+LD16	=ld -m elf_i386
 AR	=ar
 CC	=gcc
 OBJCOPY	=objcopy
 
-CFLAGS	=-m32 -march=i386 -O1 -std=gnu89 \
+CFLAGS	=-m64 -mcmodel=kernel -mno-red-zone -mgeneral-regs-only \
+	-O1 -std=gnu89 \
 	-ffreestanding -fno-builtin -nostdinc -I$(TOPDIR)/include \
 	-fno-pic -fno-pie -fno-stack-protector -fcommon \
 	-fcf-protection=none -fno-stack-clash-protection \
 	-fomit-frame-pointer -fleading-underscore \
-	-fno-strict-aliasing -fno-optimize-sibling-calls \
-	-fno-tree-loop-distribute-patterns \
+	-fno-strict-aliasing -fno-tree-loop-distribute-patterns \
 	-fno-asynchronous-unwind-tables -fno-unwind-tables \
-	-mno-mmx -mno-sse -mpreferred-stack-boundary=2 \
-	-w
+	$(WARN)
+WARN	=-w
 CPP	=gcc -E -nostdinc -I$(TOPDIR)/include

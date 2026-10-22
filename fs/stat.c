@@ -28,7 +28,7 @@ static int cp_stat(struct m_inode * inode, struct stat * statbuf)
 	return (0);
 }
 
-int sys_stat(char * filename, struct stat * statbuf)
+long sys_stat(char * filename, struct stat * statbuf)
 {
 	int i;
 	struct m_inode * inode;
@@ -40,7 +40,7 @@ int sys_stat(char * filename, struct stat * statbuf)
 	return i;
 }
 
-int sys_fstat(unsigned int fd, struct stat * statbuf)
+long sys_fstat(unsigned int fd, struct stat * statbuf)
 {
 	struct file * f;
 	struct m_inode * inode;

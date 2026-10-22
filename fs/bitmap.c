@@ -5,7 +5,7 @@
 #include <linux/kernel.h>
 
 #define clear_block(addr) do { \
-int __d0, __d1; \
+long __d0, __d1; \
 __asm__ volatile ("cld\n\t" \
 	"rep\n\t" \
 	"stosl" \
@@ -24,7 +24,7 @@ __asm__ volatile ("btrl %2,%3\n\tsetnb %%al":"=a" (res):"0" (0),"r" (nr),"m" (*(
 res;})
 
 #define find_first_zero(addr) ({ \
-int __res, __d0; \
+int __res; long __d0; \
 __asm__ volatile ("cld\n" \
 	"1:\tlodsl\n\t" \
 	"notl %%eax\n\t" \

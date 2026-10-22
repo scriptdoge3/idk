@@ -124,16 +124,23 @@
 #define __NR_getppid	64
 #define __NR_getpgrp	65
 #define __NR_setsid	66
+#define __NR_meminfo	67	/* 64-bit port */
 
+/*
+ * 64-bit port: the same int $0x80 interface, with 64-bit registers
+ * (number in %rax, arguments in %rbx, %rcx, %rdx). The kernel saves and
+ * restores everything but %rax.
+ */
 #define _syscall0(type,name) \
 type name(void) \
 { \
-type __res; \
+long __res; \
 __asm__ volatile ("int $0x80" \
 	: "=a" (__res) \
-	: "0" (__NR_##name)); \
+	: "0" ((long) __NR_##name) \
+	: "memory"); \
 if (__res >= 0) \
-	return __res; \
+	return (type) __res; \
 errno = -__res; \
 return -1; \
 }
@@ -141,12 +148,13 @@ return -1; \
 #define _syscall1(type,name,atype,a) \
 type name(atype a) \
 { \
-type __res; \
+long __res; \
 __asm__ volatile ("int $0x80" \
 	: "=a" (__res) \
-	: "0" (__NR_##name),"b" (a)); \
+	: "0" ((long) __NR_##name),"b" ((long) (a)) \
+	: "memory"); \
 if (__res >= 0) \
-	return __res; \
+	return (type) __res; \
 errno = -__res; \
 return -1; \
 }
@@ -154,12 +162,13 @@ return -1; \
 #define _syscall2(type,name,atype,a,btype,b) \
 type name(atype a,btype b) \
 { \
-type __res; \
+long __res; \
 __asm__ volatile ("int $0x80" \
 	: "=a" (__res) \
-	: "0" (__NR_##name),"b" (a),"c" (b)); \
+	: "0" ((long) __NR_##name),"b" ((long) (a)),"c" ((long) (b)) \
+	: "memory"); \
 if (__res >= 0) \
-	return __res; \
+	return (type) __res; \
 errno = -__res; \
 return -1; \
 }
@@ -167,13 +176,15 @@ return -1; \
 #define _syscall3(type,name,atype,a,btype,b,ctype,c) \
 type name(atype a,btype b,ctype c) \
 { \
-type __res; \
+long __res; \
 __asm__ volatile ("int $0x80" \
 	: "=a" (__res) \
-	: "0" (__NR_##name),"b" (a),"c" (b),"d" (c)); \
+	: "0" ((long) __NR_##name),"b" ((long) (a)),"c" ((long) (b)), \
+	  "d" ((long) (c)) \
+	: "memory"); \
 if (__res<0) \
 	errno=-__res , __res = -1; \
-return __res;\
+return (type) __res;\
 }
 
 #endif /* __LIBRARY__ */

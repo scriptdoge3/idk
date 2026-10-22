@@ -7,62 +7,62 @@
 #include <sys/times.h>
 #include <sys/utsname.h>
 
-int sys_ftime()
+long sys_ftime()
 {
 	return -ENOSYS;
 }
 
-int sys_mknod()
+long sys_mknod()
 {
 	return -ENOSYS;
 }
 
-int sys_break()
+long sys_break()
 {
 	return -ENOSYS;
 }
 
-int sys_mount()
+long sys_mount()
 {
 	return -ENOSYS;
 }
 
-int sys_umount()
+long sys_umount()
 {
 	return -ENOSYS;
 }
 
-int sys_ustat(int dev,struct ustat * ubuf)
+long sys_ustat(int dev,struct ustat * ubuf)
 {
 	return -1;
 }
 
-int sys_ptrace()
+long sys_ptrace()
 {
 	return -ENOSYS;
 }
 
-int sys_stty()
+long sys_stty()
 {
 	return -ENOSYS;
 }
 
-int sys_gtty()
+long sys_gtty()
 {
 	return -ENOSYS;
 }
 
-int sys_rename()
+long sys_rename()
 {
 	return -ENOSYS;
 }
 
-int sys_prof()
+long sys_prof()
 {
 	return -ENOSYS;
 }
 
-int sys_setgid(int gid)
+long sys_setgid(int gid)
 {
 	if (current->euid && current->uid)
 		if (current->gid==gid || current->sgid==gid)
@@ -74,44 +74,44 @@ int sys_setgid(int gid)
 	return 0;
 }
 
-int sys_acct()
+long sys_acct()
 {
 	return -ENOSYS;
 }
 
-int sys_phys()
+long sys_phys()
 {
 	return -ENOSYS;
 }
 
-int sys_lock()
+long sys_lock()
 {
 	return -ENOSYS;
 }
 
-int sys_mpx()
+long sys_mpx()
 {
 	return -ENOSYS;
 }
 
-int sys_ulimit()
+long sys_ulimit()
 {
 	return -ENOSYS;
 }
 
-int sys_time(long * tloc)
+long sys_time(long * tloc)
 {
-	int i;
+	long i;
 
 	i = CURRENT_TIME;
 	if (tloc) {
-		verify_area(tloc,4);
+		verify_area(tloc,sizeof(long));
 		put_fs_long(i,(unsigned long *)tloc);
 	}
 	return i;
 }
 
-int sys_setuid(int uid)
+long sys_setuid(int uid)
 {
 	if (current->euid && current->uid)
 		if (uid==current->uid || current->suid==current->uid)
@@ -123,7 +123,7 @@ int sys_setuid(int uid)
 	return 0;
 }
 
-int sys_stime(long * tptr)
+long sys_stime(long * tptr)
 {
 	if (current->euid && current->uid)
 		return -1;
@@ -131,7 +131,7 @@ int sys_stime(long * tptr)
 	return 0;
 }
 
-int sys_times(struct tms * tbuf)
+long sys_times(struct tms * tbuf)
 {
 	if (!tbuf)
 		return jiffies;
@@ -143,7 +143,7 @@ int sys_times(struct tms * tbuf)
 	return jiffies;
 }
 
-int sys_brk(unsigned long end_data_seg)
+long sys_brk(unsigned long end_data_seg)
 {
 	if (end_data_seg >= current->end_code &&
 	    end_data_seg < current->start_stack - 16384)
@@ -156,7 +156,7 @@ int sys_brk(unsigned long end_data_seg)
  * I just haven't get the stomach for it. I also don't fully
  * understand sessions/pgrp etc. Let somebody who does explain it.
  */
-int sys_setpgid(int pid, int pgid)
+long sys_setpgid(int pid, int pgid)
 {
 	int i;
 
@@ -176,12 +176,12 @@ int sys_setpgid(int pid, int pgid)
 	return -ESRCH;
 }
 
-int sys_getpgrp(void)
+long sys_getpgrp(void)
 {
 	return current->pgrp;
 }
 
-int sys_setsid(void)
+long sys_setsid(void)
 {
 	if (current->uid && current->euid)
 		return -EPERM;
@@ -193,10 +193,10 @@ int sys_setsid(void)
 	return current->pgrp;
 }
 
-int sys_uname(struct utsname * name)
+long sys_uname(struct utsname * name)
 {
 	static struct utsname thisname = {
-		"linux .0","nodename","release ","version ","machine "
+		"linux .0","nodename","release ","version ","x86_64"
 	};
 	int i;
 
@@ -207,7 +207,7 @@ int sys_uname(struct utsname * name)
 	return (0);
 }
 
-int sys_umask(int mask)
+long sys_umask(int mask)
 {
 	int old = current->umask;
 

@@ -1,41 +1,105 @@
 /*
- *  head.s contains the 32-bit startup code.
+ *  head.s contains the startup code.
  *
- * NOTE!!! Startup happens at absolute address 0x00000000, which is also where
- * the page directory will exist. The startup code will be overwritten by
- * the page directory.
+ * The boot loader (boot.s) jumps here, to absolute address 0, in 32-bit
+ * protected mode with paging off. The 1991 kernel just set up paging
+ * for the first 8Mb and called main().
+ *
+ * 64-bit port: from here we go on into long mode. That needs paging
+ * (4 levels, PAE format), so a set of static page tables below maps the
+ * first 1Gb of physical memory three times:
+ *
+ *	0x0000000000000000	identity, only while we switch modes
+ *	0xffff800000000000	PAGE_OFFSET: all physical memory (mm/memory.c
+ *				extends this past 1Gb once it knows the size)
+ *	0xffffffff80000000	KERNEL_BASE: the kernel image, linked here
+ *
+ * Everything in this file before the jump to the high addresses runs at
+ * physical addresses, hence all the "- KERNEL_BASE".
  */
+
+KERNEL_BASE	= 0xffffffff80000000
+
 .text
-.globl _idt,_gdt,_pg_dir
-.globl startup_32
-_pg_dir:
+.globl startup_32,_idt,_gdt,_pml4,_pdpt_direct,_pd0,_tss_desc
+
+	.code32
 startup_32:
 	movl $0x10,%eax
 	mov %ax,%ds
 	mov %ax,%es
 	mov %ax,%fs
 	mov %ax,%gs
-	lss _stack_start,%esp
-	call setup_idt
-	call setup_gdt
-	movl $0x10,%eax		# reload all the segment registers
-	mov %ax,%ds		# after changing gdt. CS was already
-	mov %ax,%es		# reloaded in 'setup_gdt'
-	mov %ax,%fs
-	mov %ax,%gs
-	lss _stack_start,%esp
+	mov %ax,%ss
+	movl $(boot_stack - KERNEL_BASE),%esp
 	xorl %eax,%eax
 1:	incl %eax		# check that A20 really IS enabled
-	movl %eax,0x000000
-	cmpl %eax,0x100000
+	movl %eax,0x000500
+	cmpl %eax,0x100500
 	je 1b
-	movl %cr0,%eax		# check math chip
-	andl $0x80000011,%eax	# Save PG,ET,PE
-	testl $0x10,%eax
-	jne 1f			# ET is set - 387 is present
-	orl $4,%eax		# else set emulate bit
-1:	movl %eax,%cr0
-	jmp after_page_tables
+
+/* no long mode, no 64-bit kernel: say so and stop */
+	movl $0x80000000,%eax
+	cpuid
+	cmpl $0x80000001,%eax
+	jb no_long_mode
+	movl $0x80000001,%eax
+	cpuid
+	btl $29,%edx		# LM
+	jnc no_long_mode
+
+	movl %cr4,%eax
+	orl $0x620,%eax		# PAE, and OSFXSR/OSXMMEXCPT: we save the
+	movl %eax,%cr4		# sse registers too (fxsave) - turns sse on
+	movl $(_pml4 - KERNEL_BASE),%eax
+	movl %eax,%cr3
+	movl $0xc0000080,%ecx	# EFER
+	rdmsr
+	orl $0x100,%eax		# LME
+	wrmsr
+	movl %cr0,%eax
+	andl $~0x0c,%eax	# EM, TS off: the fpu/sse unit is used
+	orl $0x80000003,%eax	# PG, MP, PE. WP stays off, as on a 386:
+	movl %eax,%cr0		# verify_area() handles copy-on-write
+	lgdt (gdt_desc32 - KERNEL_BASE)
+	ljmp $0x08,$(startup_64 - KERNEL_BASE)
+
+no_long_mode:
+	movl $(no_lm_msg - KERNEL_BASE),%esi
+	movl $0xb8000,%edi
+	movb $0x0c,%ah		# light red
+1:	lodsb
+	testb %al,%al
+	je 2f
+	stosw
+	jmp 1b
+2:	hlt
+	jmp 2b
+
+no_lm_msg:
+	.asciz "This kernel needs a 64-bit (x86-64) CPU."
+
+	.code64
+startup_64:
+	movabsq $1f,%rax	# on to the kernel's real addresses
+	jmp *%rax
+1:	lgdt gdt_desc64
+	movl $0x10,%eax		# reload all the segment registers
+	mov %ax,%ds		# after changing gdt.
+	mov %ax,%es
+	mov %ax,%ss
+	xorl %eax,%eax
+	mov %ax,%fs
+	mov %ax,%gs
+	movq _stack_start,%rsp
+	call setup_idt
+	cld
+	xorl %edi,%edi		# These are the parameters to main :-)
+	xorl %esi,%esi
+	xorl %edx,%edx
+	call _main
+L6:	hlt			# main should never return here, but
+	jmp L6			# just in case, we know what happens.
 
 /*
  *  setup_idt
@@ -45,133 +109,99 @@ startup_32:
  *  idt. Everything that wants to install itself
  *  in the idt-table may do so themselves. Interrupts
  *  are enabled elsewhere, when we can be relatively
- *  sure everything is ok. This routine will be over-
- *  written by the page tables.
+ *  sure everything is ok.
+ *
+ *  A 64-bit gate is 16 bytes: offset 0-15, selector, type (0x8E is a
+ *  present interrupt gate, dpl=0), offset 16-31, offset 32-63, zero.
  */
 setup_idt:
-	lea ignore_int,%edx
+	leaq ignore_int,%rdx
 	movl $0x00080000,%eax
 	movw %dx,%ax		/* selector = 0x0008 = cs */
 	movw $0x8E00,%dx	/* interrupt gate - dpl=0, present */
-
-	lea _idt,%edi
-	mov $256,%ecx
+	movq %rdx,%rcx
+	shrq $32,%rcx		/* offset 32-63 */
+	leaq _idt,%rdi
+	movl $256,%esi
 rp_sidt:
-	movl %eax,(%edi)
-	movl %edx,4(%edi)
-	addl $8,%edi
-	dec %ecx
+	movl %eax,(%rdi)
+	movl %edx,4(%rdi)
+	movq %rcx,8(%rdi)
+	addq $16,%rdi
+	decl %esi
 	jne rp_sidt
 	lidt idt_descr
 	ret
 
-/*
- *  setup_gdt
- *
- *  This routines sets up a new gdt and loads it.
- *  Only two entries are currently built, the same
- *  ones that were built in init.s. The routine
- *  is VERY complicated at two whole lines, so this
- *  rather long comment is certainly needed :-).
- *  This routine will beoverwritten by the page tables.
- */
-setup_gdt:
-	lgdt gdt_descr
-	ret
-
-.org 0x1000
-pg0:
-
-.org 0x2000
-pg1:
-
-.org 0x3000
-pg2:		# This is not used yet, but if you
-		# want to expand past 8 Mb, you'll have
-		# to use it.
-
-.org 0x4000
-after_page_tables:
-	pushl $0		# These are the parameters to main :-)
-	pushl $0
-	pushl $0
-	pushl $L6		# return address for main, if it decides to.
-	pushl $_main
-	jmp setup_paging
-L6:
-	jmp L6			# main should never return here, but
-				# just in case, we know what happens.
-
 /* This is the default interrupt "handler" :-) */
-.p2align 2
+.p2align 3
 ignore_int:
-	incb 0xb8000+160		# put something on the screen
-	movb $2,0xb8000+161		# so that we know something
-	iret				# happened
+	incb KERNEL_BASE+0xb8000+160	# put something on the screen
+	movb $2,KERNEL_BASE+0xb8000+161	# so that we know something
+	iretq				# happened
 
+.p2align 3
+.word 0,0,0
+idt_descr:
+	.word 256*16-1		# idt contains 256 entries
+	.quad _idt
+.p2align 3
+.word 0,0,0
+gdt_desc64:
+	.word gdt_end-_gdt-1
+	.quad _gdt
+.p2align 3
+.word 0,0,0
+gdt_desc32:
+	.word gdt_end-_gdt-1
+	.long _gdt - KERNEL_BASE
 
 /*
- * Setup_paging
- *
- * This routine sets up paging by setting the page bit
- * in cr0. The page tables are set up, identity-mapping
- * the first 8MB. The pager assumes that no illegal
- * addresses are produced (ie >4Mb on a 4Mb machine).
- *
- * NOTE! Although all physical memory should be identity
- * mapped by this routine, only the kernel page functions
- * use the >1Mb addresses directly. All "normal" functions
- * use just the lower 1Mb, or the local data space, which
- * will be mapped to some other place - mm keeps track of
- * that.
- *
- * For those with more memory than 8 Mb - tough luck. I've
- * not got it, why should you :-) The source is here. Change
- * it. (Seriously - it shouldn't be too difficult. Mostly
- * change some constants etc. I left it at 8Mb, as my machine
- * even cannot be extended past that (ok, but it was cheap :-)
- * I've tried to show which constants to change by having
- * some kind of marker at them (search for "8Mb"), but I
- * won't guarantee that's all :-( )
+ * The selectors are fixed: 0x08 kernel code, 0x10 kernel data, 0x1b user
+ * code, 0x23 user data (see USER_CS/USER_DS in <linux/sched.h>), 0x28 the
+ * one TSS. 1991's per-task TSS and LDT entries are gone: long mode has
+ * neither hardware task switching nor segment bases to separate tasks.
  */
-.p2align 2
-setup_paging:
-	movl $1024*3,%ecx
-	xorl %eax,%eax
-	xorl %edi,%edi			/* pg_dir is at 0x000 */
-	cld;rep;stosl
-	movl $pg0+7,_pg_dir		/* set present bit/user r/w */
-	movl $pg1+7,_pg_dir+4		/*  --------- " " --------- */
-	movl $pg1+4092,%edi
-	movl $0x7ff007,%eax		/*  8Mb - 4096 + 7 (r/w user,p) */
-	std
-1:	stosl			/* fill pages backwards - more efficient :-) */
-	subl $0x1000,%eax
-	jge 1b
-	cld			/* gcc-compiled code expects DF=0 */
-	xorl %eax,%eax		/* pg_dir is at 0x0000 */
-	movl %eax,%cr3		/* cr3 - page directory start */
-	movl %cr0,%eax
-	orl $0x80000000,%eax
-	movl %eax,%cr0		/* set paging (PG) bit */
-	ret			/* this also flushes prefetch-queue */
-
-.p2align 2
-.word 0
-idt_descr:
-	.word 256*8-1		# idt contains 256 entries
-	.long _idt
-.p2align 2
-.word 0
-gdt_descr:
-	.word 256*8-1		# so does gdt (not that that's any
-	.long _gdt		# magic number, but it works for me :^)
-
-	.p2align 3
-_idt:	.fill 256,8,0		# idt is uninitialized
-
+.p2align 3
 _gdt:	.quad 0x0000000000000000	/* NULL descriptor */
-	.quad 0x00c09a00000007ff	/* 8Mb */
-	.quad 0x00c09200000007ff	/* 8Mb */
-	.quad 0x0000000000000000	/* TEMPORARY - don't use */
-	.fill 252,8,0			/* space for LDT's and TSS's etc */
+	.quad 0x00af9a000000ffff	/* kernel code, 64-bit */
+	.quad 0x00cf92000000ffff	/* kernel data */
+	.quad 0x00affa000000ffff	/* user code, 64-bit, dpl 3 */
+	.quad 0x00cff2000000ffff	/* user data, dpl 3 */
+_tss_desc:
+	.quad 0,0			/* tss (16 bytes), see sched_init() */
+gdt_end:
+
+.p2align 4
+_idt:	.fill 512,8,0			# idt is uninitialized (256 16-byte gates)
+
+	.fill 256,8,0			# just enough stack to get to main()
+boot_stack:
+
+/*
+ * The page tables. Entries are physical addresses + 3 (present, r/w).
+ * pd0 maps the first 1Gb with 2Mb pages (+0x80).
+ */
+.p2align 12
+_pml4:
+	.quad pdpt_low - KERNEL_BASE + 3	/* removed by main() */
+	.fill 255,8,0
+	.quad _pdpt_direct - KERNEL_BASE + 3	/* PAGE_OFFSET */
+	.fill 254,8,0
+	.quad pdpt_kernel - KERNEL_BASE + 3	/* KERNEL_BASE */
+pdpt_low:
+	.quad _pd0 - KERNEL_BASE + 3
+	.fill 511,8,0
+_pdpt_direct:
+	.quad _pd0 - KERNEL_BASE + 3
+	.fill 511,8,0
+pdpt_kernel:
+	.fill 510,8,0
+	.quad _pd0 - KERNEL_BASE + 3
+	.quad 0
+_pd0:
+	.set i,0
+	.rept 512
+	.quad (i << 21) + 0x83
+	.set i,i+1
+	.endr

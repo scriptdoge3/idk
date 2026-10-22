@@ -68,11 +68,16 @@ struct buffer_head {
 	struct buffer_head * b_next_free;
 };
 
+/*
+ * 64-bit port: what's on the disk keeps its 1991 layout, so the fields
+ * that were "long" (32 bits then) are "int" now - here, at the start of
+ * m_inode, which mirrors d_inode, and in the super block.
+ */
 struct d_inode {
 	unsigned short i_mode;
 	unsigned short i_uid;
-	unsigned long i_size;
-	unsigned long i_time;
+	unsigned int i_size;
+	unsigned int i_time;
 	unsigned char i_gid;
 	unsigned char i_nlinks;
 	unsigned short i_zone[9];
@@ -81,8 +86,8 @@ struct d_inode {
 struct m_inode {
 	unsigned short i_mode;
 	unsigned short i_uid;
-	unsigned long i_size;
-	unsigned long i_mtime;
+	unsigned int i_size;
+	unsigned int i_mtime;
 	unsigned char i_gid;
 	unsigned char i_nlinks;
 	unsigned short i_zone[9];
@@ -99,6 +104,7 @@ struct m_inode {
 	unsigned char i_mount;
 	unsigned char i_seek;
 	unsigned char i_update;
+	char * i_pipe_buf;	/* 1991 kept a pipe's page address in i_size */
 };
 
 #define PIPE_HEAD(inode) (((long *)((inode).i_zone))[0])
@@ -124,7 +130,7 @@ struct super_block {
 	unsigned short s_zmap_blocks;
 	unsigned short s_firstdatazone;
 	unsigned short s_log_zone_size;
-	unsigned long s_max_size;
+	unsigned int s_max_size;
 	unsigned short s_magic;
 /* These are only in memory */
 	struct buffer_head * s_imap[8];

@@ -1,7 +1,7 @@
 /*
  * 'kernel.h' contains some often-used function prototypes etc
  */
-void verify_area(void * addr,int count);
+void verify_area(void * addr,long count);
 void panic(const char * str) __attribute__((noreturn));
 int printf(const char * fmt, ...);
 int printk(const char * fmt, ...);

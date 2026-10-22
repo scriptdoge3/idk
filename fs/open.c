@@ -10,7 +10,7 @@
 #include <linux/kernel.h>
 #include <asm/segment.h>
 
-int sys_utime(char * filename, struct utimbuf * times)
+long sys_utime(char * filename, struct utimbuf * times)
 {
 	struct m_inode * inode;
 	long actime,modtime;
@@ -29,7 +29,7 @@ int sys_utime(char * filename, struct utimbuf * times)
 	return 0;
 }
 
-int sys_access(const char * filename,int mode)
+long sys_access(const char * filename,int mode)
 {
 	struct m_inode * inode;
 	int res;
@@ -53,7 +53,7 @@ int sys_access(const char * filename,int mode)
 	return -EACCES;
 }
 
-int sys_chdir(const char * filename)
+long sys_chdir(const char * filename)
 {
 	struct m_inode * inode;
 
@@ -68,7 +68,7 @@ int sys_chdir(const char * filename)
 	return (0);
 }
 
-int sys_chroot(const char * filename)
+long sys_chroot(const char * filename)
 {
 	struct m_inode * inode;
 
@@ -83,7 +83,7 @@ int sys_chroot(const char * filename)
 	return (0);
 }
 
-int sys_chmod(const char * filename,int mode)
+long sys_chmod(const char * filename,int mode)
 {
 	struct m_inode * inode;
 
@@ -101,7 +101,7 @@ int sys_chmod(const char * filename,int mode)
 	return 0;
 }
 
-int sys_chown(const char * filename,int uid,int gid)
+long sys_chown(const char * filename,int uid,int gid)
 {
 	struct m_inode * inode;
 
@@ -118,7 +118,7 @@ int sys_chown(const char * filename,int uid,int gid)
 	return 0;
 }
 
-int sys_open(const char * filename,int flag,int mode)
+long sys_open(const char * filename,int flag,int mode)
 {
 	struct m_inode * inode;
 	struct file * f;
@@ -164,12 +164,12 @@ int sys_open(const char * filename,int flag,int mode)
 	return (fd);
 }
 
-int sys_creat(const char * pathname, int mode)
+long sys_creat(const char * pathname, int mode)
 {
 	return sys_open(pathname, O_CREAT | O_TRUNC, mode);
 }
 
-int sys_close(unsigned int fd)
+long sys_close(unsigned int fd)
 {	
 	struct file * filp;
 

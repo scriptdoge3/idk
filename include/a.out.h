@@ -3,8 +3,13 @@
 
 #define __GNU_EXEC_MACROS__
 
+/*
+ * 64-bit port: the fields are 32 bits, as they were (long was 32 bits),
+ * and the machine type in a_magic's third byte says the text is x86-64
+ * code: 1991's binaries have 0 there.
+ */
 struct exec {
-  unsigned long a_magic;	/* Use macros N_MAGIC, etc for access */
+  unsigned int a_magic;		/* Use macros N_MAGIC, etc for access */
   unsigned a_text;		/* length of text, in bytes */
   unsigned a_data;		/* length of data, in bytes */
   unsigned a_bss;		/* length of uninitialized data area for file, in bytes */
@@ -15,8 +20,10 @@ struct exec {
 };
 
 #ifndef N_MAGIC
-#define N_MAGIC(exec) ((exec).a_magic)
+#define N_MAGIC(exec) ((exec).a_magic & 0xffff)
 #endif
+#define N_MACHTYPE(exec) (((exec).a_magic >> 16) & 0xff)
+#define M_X86_64 64
 
 #ifndef OMAGIC
 /* Code indicating object file or impure executable.  */

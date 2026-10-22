@@ -4,9 +4,9 @@
 
 #include <linux/sched.h>
 
-extern int tty_ioctl(int dev, int cmd, int arg);
+extern int tty_ioctl(int dev, int cmd, unsigned long arg);
 
-typedef int (*ioctl_ptr)(int dev,int cmd,int arg);
+typedef int (*ioctl_ptr)(int dev,int cmd,unsigned long arg);
 
 #define NRDEVS ((sizeof (ioctl_table))/(sizeof (ioctl_ptr)))
 
@@ -21,7 +21,7 @@ static ioctl_ptr ioctl_table[]={
 	NULL};		/* named pipes */
 	
 
-int sys_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg)
+long sys_ioctl(unsigned int fd, unsigned int cmd, unsigned long arg)
 {	
 	struct file * filp;
 	int dev,mode;

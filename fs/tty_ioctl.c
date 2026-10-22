@@ -79,7 +79,7 @@ static int set_termio(struct tty_struct * tty, struct termio * termio)
 	return 0;
 }
 
-int tty_ioctl(int dev, int cmd, int arg)
+int tty_ioctl(int dev, int cmd, unsigned long arg)
 {
 	struct tty_struct * tty;
 	if (MAJOR(dev) == 5) {
@@ -133,14 +133,14 @@ int tty_ioctl(int dev, int cmd, int arg)
 			return -EINVAL; /* set controlling term NI */
 		case TIOCGPGRP:
 			verify_area((void *) arg,4);
-			put_fs_long(tty->pgrp,(unsigned long *) arg);
+			put_fs_int(tty->pgrp,(unsigned int *) arg);
 			return 0;
 		case TIOCSPGRP:
-			tty->pgrp=get_fs_long((unsigned long *) arg);
+			tty->pgrp=get_fs_int((unsigned int *) arg);
 			return 0;
 		case TIOCOUTQ:
 			verify_area((void *) arg,4);
-			put_fs_long(CHARS(tty->write_q),(unsigned long *) arg);
+			put_fs_int(CHARS(tty->write_q),(unsigned int *) arg);
 			return 0;
 		case TIOCSTI:
 			return -EINVAL; /* not implemented */

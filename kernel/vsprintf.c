@@ -26,12 +26,13 @@ static int skip_atoi(const char **s)
 #define SPECIAL	32		/* 0x */
 #define SMALL	64		/* use 'abcdef' instead of 'ABCDEF' */
 
+/* 64-bit port: 64-bit numbers ('l', and %p is 16 digits) */
 #define do_div(n,base) ({ \
-int __res; \
-__asm__("divl %4":"=a" (n),"=d" (__res):"0" (n),"1" (0),"r" (base)); \
+int __res = ((unsigned long) (n)) % (base); \
+(n) = ((unsigned long) (n)) / (base); \
 __res; })
 
-static char * number(char * str, int num, int base, int size, int precision
+static char * number(char * str, long num, int base, int size, int precision
 	,int type)
 {
 	char c,sign,tmp[36];
@@ -178,13 +179,15 @@ int vsprintf(char *buf, const char *fmt, va_list args)
 			break;
 
 		case 'o':
-			str = number(str, va_arg(args, unsigned long), 8,
+			str = number(str, qualifier == 'l' ?
+				va_arg(args, unsigned long) :
+				va_arg(args, unsigned int), 8,
 				field_width, precision, flags);
 			break;
 
 		case 'p':
 			if (field_width == -1) {
-				field_width = 8;
+				field_width = 16;
 				flags |= ZEROPAD;
 			}
 			str = number(str,
@@ -195,15 +198,22 @@ int vsprintf(char *buf, const char *fmt, va_list args)
 		case 'x':
 			flags |= SMALL;
 		case 'X':
-			str = number(str, va_arg(args, unsigned long), 16,
+			str = number(str, qualifier == 'l' ?
+				va_arg(args, unsigned long) :
+				va_arg(args, unsigned int), 16,
 				field_width, precision, flags);
 			break;
 
 		case 'd':
 		case 'i':
-			flags |= SIGN;
+			str = number(str, qualifier == 'l' ?
+				va_arg(args, long) : va_arg(args, int), 10,
+				field_width, precision, flags | SIGN);
+			break;
 		case 'u':
-			str = number(str, va_arg(args, unsigned long), 10,
+			str = number(str, qualifier == 'l' ?
+				va_arg(args, unsigned long) :
+				va_arg(args, unsigned int), 10,
 				field_width, precision, flags);
 			break;
 

@@ -8,8 +8,10 @@
 #include <linux/mm.h>
 #include <asm/segment.h>
 
-extern int sys_exit(int exit_code);
-extern int sys_close(int fd);
+#include <string.h>
+
+extern long sys_exit(int exit_code);
+extern long sys_close(int fd);
 
 /*
  * MAX_ARG_PAGES defines the number of pages allocated for arguments
@@ -18,19 +20,12 @@ extern int sys_close(int fd);
  */
 #define MAX_ARG_PAGES 32
 
-#define cp_block(from,to) do { \
-int __d0, __d1, __d2; \
-__asm__ volatile ("pushl $0x10\n\t" \
-	"pushl $0x17\n\t" \
-	"pop %%es\n\t" \
-	"cld\n\t" \
-	"rep\n\t" \
-	"movsl\n\t" \
-	"pop %%es" \
-	:"=&c" (__d0),"=&S" (__d1),"=&D" (__d2) \
-	:"0" (BLOCK_SIZE/4),"1" (from),"2" (to) \
-	:"memory"); \
-} while (0)
+/*
+ * 64-bit port: the process is loaded at its own address 0 .. in the
+ * current page tables, so a block is just copied there. Pages appear
+ * as they are touched (do_no_page).
+ */
+#define cp_block(from,to) memcpy((void *) (unsigned long) (to),(from),BLOCK_SIZE)
 
 /*
  * read_head() reads blocks 1-6 (not 0). Block 0 has already been
@@ -105,8 +100,8 @@ int read_area(struct m_inode * inode,long size)
 		return -1;
 	table = (unsigned short *) dind->b_data;
 	for(count=0 ; count<512 ; count++)
-		if ((i=read_ind(inode->i_dev,*(table++),size,
-		    BLOCK_SIZE*(518+count))) || (size -= BLOCK_SIZE*512)<=0)
+		if ((i=read_ind(inode->i_dev,*(table++),size,	/* 1991: 518+count */
+		    BLOCK_SIZE*(518+512*count))) || (size -= BLOCK_SIZE*512)<=0)
 			return i;
 	panic("Impossibly long executable");
 }
@@ -121,7 +116,7 @@ static unsigned long * create_tables(char * p,int argc,int envc)
 	unsigned long *argv,*envp;
 	unsigned long * sp;
 
-	sp = (unsigned long *) (0xfffffffc & (unsigned long) p);
+	sp = (unsigned long *) (~7UL & (unsigned long) p);
 	sp -= envc+1;
 	envp = sp;
 	sp -= argc+1;
@@ -175,7 +170,8 @@ static unsigned long copy_strings(int argc,char ** argv,unsigned long *page,
 		do {
 			len++;
 		} while (get_fs_byte(tmp++));
-		if (p-len < 0)		/* this shouldn't happen - 128kB */
+		if (len > p)		/* this shouldn't happen - 128kB */
+					/* (1991: p-len < 0, never true) */
 			return 0;
 		i = ((unsigned) (p-len)) >> 12;
 		while (i<MAX_ARG_PAGES && !page[i]) {
@@ -194,35 +190,33 @@ static unsigned long copy_strings(int argc,char ** argv,unsigned long *page,
 	return p;
 }
 
-static unsigned long change_ldt(unsigned long text_size,unsigned long * page)
+/*
+ * 1991's change_ldt() set the segments' bases and limits and put the
+ * argument pages at the top of the 64Mb data segment. 64-bit port: no
+ * segments; the argument pages go at the top of the address space.
+ */
+static unsigned long setup_arg_pages(unsigned long * page)
 {
-	unsigned long code_limit,data_limit,code_base,data_base;
+	unsigned long data_base;
 	int i;
 
-	code_limit = text_size+PAGE_SIZE -1;
-	code_limit &= 0xFFFFF000;
-	data_limit = 0x4000000;
-	code_base = get_base(current->ldt[1]);
-	data_base = code_base;
-	set_base(current->ldt[1],code_base);
-	set_limit(current->ldt[1],code_limit);
-	set_base(current->ldt[2],data_base);
-	set_limit(current->ldt[2],data_limit);
-/* make sure fs points to the NEW data segment */
-	__asm__("pushl $0x17\n\tpop %%fs"::);
-	data_base += data_limit;
+	data_base = TASK_SIZE;
 	for (i=MAX_ARG_PAGES-1 ; i>=0 ; i--) {
 		data_base -= PAGE_SIZE;
 		if (page[i])
 			put_page(page[i],data_base);
 	}
-	return data_limit;
+	return TASK_SIZE;
 }
 
 /*
  * 'do_execve()' executes a new program.
+ *
+ * 64-bit port: 'regs' are the caller's saved registers (1991: a pointer
+ * to the eip on the stack). The caller may be the init task, still in
+ * the kernel: exec puts it in user mode by setting cs and ss as well.
  */
-int do_execve(unsigned long * eip,long tmp,char * filename,
+int do_execve(struct regs * regs,char * filename,
 	char ** argv, char ** envp)
 {
 	struct m_inode * inode;
@@ -232,8 +226,6 @@ int do_execve(unsigned long * eip,long tmp,char * filename,
 	int i,argc,envc;
 	unsigned long p;
 
-	if ((0xffff & eip[1]) != 0x000f)
-		panic("execve called from supervisor mode");
 	for (i=0 ; i<MAX_ARG_PAGES ; i++)	/* clear page-table */
 		page[i]=0;
 	if (!(inode=namei(filename)))		/* get executables inode */
@@ -260,8 +252,9 @@ int do_execve(unsigned long * eip,long tmp,char * filename,
 	}
 	ex = *((struct exec *) bh->b_data);	/* read exec-header */
 	brelse(bh);
-	if (N_MAGIC(ex) != ZMAGIC || ex.a_trsize || ex.a_drsize ||
-		ex.a_text+ex.a_data+ex.a_bss>0x3000000 ||
+	if (N_MAGIC(ex) != ZMAGIC || N_MACHTYPE(ex) != M_X86_64 ||
+		ex.a_trsize || ex.a_drsize ||
+		(unsigned long) ex.a_text+ex.a_data+ex.a_bss > 0x80000000UL ||
 		inode->i_size < ex.a_text+ex.a_data+ex.a_syms+N_TXTOFF(ex)) {
 		iput(inode);
 		return -ENOEXEC;
@@ -285,12 +278,12 @@ int do_execve(unsigned long * eip,long tmp,char * filename,
 		if ((current->close_on_exec>>i)&1)
 			sys_close(i);
 	current->close_on_exec = 0;
-	free_page_tables(get_base(current->ldt[1]),get_limit(0x0f));
-	free_page_tables(get_base(current->ldt[2]),get_limit(0x17));
+	free_page_tables(current->pml4);
 	if (last_task_used_math == current)
 		last_task_used_math = NULL;
 	current->used_math = 0;
-	p += change_ldt(ex.a_text,page)-MAX_ARG_PAGES*PAGE_SIZE;
+	current->fs_kernel = 0;		/* from now on, a user process */
+	p += setup_arg_pages(page)-MAX_ARG_PAGES*PAGE_SIZE;
 	p = (unsigned long) create_tables((char *)p,argc,envc);
 	current->brk = ex.a_bss +
 		(current->end_data = ex.a_data +
@@ -302,8 +295,17 @@ int do_execve(unsigned long * eip,long tmp,char * filename,
 		sys_exit(-1);
 	i = ex.a_text+ex.a_data;
 	while (i&0xfff)
-		put_fs_byte(0,(char *) (i++));
-	eip[0] = ex.a_entry;		/* eip, magic happens :-) */
-	eip[3] = p;			/* stack pointer */
+		put_fs_byte(0,(char *) (unsigned long) (i++));
+	memset(regs,0,sizeof(*regs));
+	regs->rip = ex.a_entry;		/* eip, magic happens :-) */
+	regs->rsp = p;			/* stack pointer */
+	regs->cs = USER_CS;
+	regs->ss = USER_DS;
+	regs->rflags = 0x202;		/* interrupts on */
 	return 0;
+}
+
+long sys_execve(char * filename,char ** argv,char ** envp,struct regs * regs)
+{
+	return do_execve(regs,filename,argv,envp);
 }

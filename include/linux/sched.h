@@ -25,61 +25,63 @@
 #define NULL ((void *) 0)
 #endif
 
-extern int copy_page_tables(unsigned long from, unsigned long to, long size);
-extern int free_page_tables(unsigned long from, long size);
+/* segment selectors, see the gdt in boot/head.s */
+#define KERNEL_CS	0x08
+#define KERNEL_DS	0x10
+#define USER_CS		0x1b
+#define USER_DS		0x23
+#define TSS_SEL		0x28
+
+/*
+ * 64-bit port: each task has a two-page block: the task_struct at the
+ * bottom, its kernel stack above it (1991: one page, and a tss for the
+ * hardware to switch with).
+ */
+#define TASK_BLOCK	(2*PAGE_SIZE)
+
+extern int copy_page_tables(unsigned long * from, unsigned long * to);
+extern void free_page_tables(unsigned long * pml4);
 
 extern void sched_init(void);
 extern void schedule(void);
 extern void trap_init(void);
-extern void panic(const char * str);
+extern void panic(const char * str) __attribute__((noreturn));
 extern int tty_write(unsigned minor,char * buf,int count);
 
-typedef int (*fn_ptr)();
+typedef long (*fn_ptr)();
 
-struct i387_struct {
-	long	cwd;
-	long	swd;
-	long	twd;
-	long	fip;
-	long	fcs;
-	long	foo;
-	long	fos;
-	long	st_space[20];	/* 8*10 bytes for each FP-reg = 80 bytes */
+/*
+ * The registers as the low-level entry code (kernel/system_call.s)
+ * saves them on the kernel stack: one of these sits at the top of the
+ * kernel stack while a process is in the kernel.
+ */
+struct regs {
+	unsigned long r15,r14,r13,r12,r11,r10,r9,r8;
+	unsigned long rbp,rdi,rsi,rdx,rcx,rbx,rax;
+	unsigned long pad;		/* keeps the C stack 16-byte aligned */
+	unsigned long error_code;	/* pushed by the cpu, or 0 */
+	unsigned long rip,cs,rflags,rsp,ss;
 };
 
+/* the one tss: only rsp0 (and a stack for double faults) matter */
 struct tss_struct {
-	long	back_link;	/* 16 high bits zero */
-	long	esp0;
-	long	ss0;		/* 16 high bits zero */
-	long	esp1;
-	long	ss1;		/* 16 high bits zero */
-	long	esp2;
-	long	ss2;		/* 16 high bits zero */
-	long	cr3;
-	long	eip;
-	long	eflags;
-	long	eax,ecx,edx,ebx;
-	long	esp;
-	long	ebp;
-	long	esi;
-	long	edi;
-	long	es;		/* 16 high bits zero */
-	long	cs;		/* 16 high bits zero */
-	long	ss;		/* 16 high bits zero */
-	long	ds;		/* 16 high bits zero */
-	long	fs;		/* 16 high bits zero */
-	long	gs;		/* 16 high bits zero */
-	long	ldt;		/* 16 high bits zero */
-	long	trace_bitmap;	/* bits: trace 0, bitmap 16-31 */
-	struct i387_struct i387;
-};
+	unsigned int	reserved0;
+	unsigned long	rsp0,rsp1,rsp2;
+	unsigned long	reserved1;
+	unsigned long	ist[7];
+	unsigned long	reserved2;
+	unsigned short	reserved3;
+	unsigned short	iomap_base;
+} __attribute__((packed));
 
 struct task_struct {
-/* these are hardcoded - don't touch */
+/* these are hardcoded - don't touch (kernel/system_call.s) */
 	long state;	/* -1 unrunnable, 0 runnable, >0 stopped */
 	long counter;
 	long priority;
 	long signal;
+	unsigned long ksp;	/* kernel stack pointer while switched out */
+	unsigned long cr3;	/* physical address of the page tables */
 	fn_ptr sig_restorer;
 	fn_ptr sig_fn[32];
 /* various fields */
@@ -91,6 +93,7 @@ struct task_struct {
 	long alarm;
 	long utime,stime,cutime,cstime,start_time;
 	unsigned short used_math;
+	unsigned short fs_kernel;	/* "fs" may point at kernel data */
 /* file system info */
 	int tty;		/* -1 if no tty, so it must be signed */
 	unsigned short umask;
@@ -98,37 +101,27 @@ struct task_struct {
 	struct m_inode * root;
 	unsigned long close_on_exec;
 	struct file * filp[NR_OPEN];
-/* ldt for this task 0 - zero 1 - cs 2 - ds&ss */
-	struct desc_struct ldt[3];
-/* tss for this task */
-	struct tss_struct tss;
+/* 64-bit port: these replace the ldt and the tss */
+	unsigned long * pml4;	/* page tables, kernel virtual address */
+	unsigned char fxsave[512] __attribute__((aligned(16)));
 };
 
 /*
  *  INIT_TASK is used to set up the first task table, touch at
- * your own risk!. Base=0, limit=0x9ffff (=640kB)
+ * your own risk!. Task 0 never leaves the kernel: it is the idle task
+ * and runs on the kernel's own page tables.
  */
 #define INIT_TASK \
 /* state etc */	{ 0,15,15, \
-/* signals */	0,NULL,{(fn_ptr) 0,}, \
+/* signals */	0,0,0,NULL,{(fn_ptr) 0,}, \
 /* ec,brk... */	0,0,0,0,0, \
 /* pid etc.. */	0,-1,0,0,0, \
 /* uid etc */	0,0,0,0,0,0, \
 /* alarm */	0,0,0,0,0,0, \
-/* math */	0, \
+/* math */	0,1, \
 /* fs info */	-1,0133,NULL,NULL,0, \
 /* filp */	{NULL,}, \
-	{ \
-		{0,0}, \
-/* ldt */	{0x9f,0xc0fa00}, \
-		{0x9f,0xc0f200}, \
-	}, \
-/*tss*/	{0,PAGE_SIZE+(long)&init_task,0x10,0,0,0,0,(long)&pg_dir,\
-	 0,0,0,0,0,0,0,0, \
-	 0,0,0x17,0x17,0x17,0x17,0x17,0x17, \
-	 _LDT(0),0x80000000, \
-		{} \
-	}, \
+/* pml4 */	pml4, \
 }
 
 extern struct task_struct *task[NR_TASKS];
@@ -136,6 +129,7 @@ extern struct task_struct *last_task_used_math;
 extern struct task_struct *current;
 extern long volatile jiffies;
 extern long startup_time;
+extern struct tss_struct tss;
 
 #define CURRENT_TIME (startup_time+jiffies/HZ)
 
@@ -144,95 +138,21 @@ extern void interruptible_sleep_on(struct task_struct ** p);
 extern void wake_up(struct task_struct ** p);
 
 /*
- * Entry into gdt where to find first TSS. 0-nul, 1-cs, 2-ds, 3-syscall
- * 4-TSS0, 5-LDT0, 6-TSS1 etc ...
- */
-#define FIRST_TSS_ENTRY 4
-#define FIRST_LDT_ENTRY (FIRST_TSS_ENTRY+1)
-#define _TSS(n) ((((unsigned long) n)<<4)+(FIRST_TSS_ENTRY<<3))
-#define _LDT(n) ((((unsigned long) n)<<4)+(FIRST_LDT_ENTRY<<3))
-#define ltr(n) __asm__("ltr %%ax"::"a" (_TSS(n)))
-#define lldt(n) __asm__("lldt %%ax"::"a" (_LDT(n)))
-#define str(n) \
-__asm__("str %%ax\n\t" \
-	"subl %2,%%eax\n\t" \
-	"shrl $4,%%eax" \
-	:"=a" (n) \
-	:"0" (0),"i" (FIRST_TSS_ENTRY<<3))
-/*
  *	switch_to(n) should switch tasks to task nr n, first
  * checking that n isn't the current task, in which case it does nothing.
- * This also clears the TS-flag if the task we switched to has used
- * tha math co-processor latest.
+ *
+ * 64-bit port: there is no hardware task switch any more. switch_task
+ * (kernel/system_call.s) saves the callee-saved registers and flags on
+ * the old kernel stack, takes the new one, loads cr3 and the tss's rsp0,
+ * and sets TS unless the new task was the last to use the fpu.
  */
+extern void switch_task(struct task_struct * next);
+
 #define switch_to(n) {\
-struct {long a,b;} __tmp; \
-long __d0, __d1; \
-__asm__ volatile ("cmpl %%ecx,_current\n\t" \
-	"je 1f\n\t" \
-	"xchgl %%ecx,_current\n\t" \
-	"movw %%dx,%1\n\t" \
-	"ljmp *%0\n\t" \
-	"cmpl %%ecx,%4\n\t" \
-	"jne 1f\n\t" \
-	"clts\n" \
-	"1:" \
-	:"=m" (__tmp.a),"=m" (__tmp.b),"=d" (__d0),"=c" (__d1) \
-	:"m" (last_task_used_math),"2" _TSS(n),"3" ((long) task[n]) \
-	:"memory"); \
+	if (task[n] != current) \
+		switch_task(task[n]); \
 }
 
-#define PAGE_ALIGN(n) (((n)+0xfff)&0xfffff000)
-
-#define _set_base(addr,base) do { \
-long __d0; \
-__asm__ volatile ("movw %%dx,%0\n\t" \
-	"rorl $16,%%edx\n\t" \
-	"movb %%dl,%1\n\t" \
-	"movb %%dh,%2" \
-	:"=m" (*((addr)+2)), \
-	 "=m" (*((addr)+4)), \
-	 "=m" (*((addr)+7)), \
-	 "=d" (__d0) \
-	:"3" (base) \
-	:"memory"); \
-} while (0)
-
-#define _set_limit(addr,limit) do { \
-long __d0; \
-__asm__ volatile ("movw %%dx,%0\n\t" \
-	"rorl $16,%%edx\n\t" \
-	"movb %1,%%dh\n\t" \
-	"andb $0xf0,%%dh\n\t" \
-	"orb %%dh,%%dl\n\t" \
-	"movb %%dl,%1" \
-	:"=m" (*(addr)), \
-	 "+m" (*((addr)+6)), \
-	 "=d" (__d0) \
-	:"2" (limit) \
-	:"memory"); \
-} while (0)
-
-#define set_base(ldt,base) _set_base( ((char *)&(ldt)) , base )
-#define set_limit(ldt,limit) _set_limit( ((char *)&(ldt)) , (limit-1)>>12 )
-
-#define _get_base(addr) ({\
-unsigned long __base; \
-__asm__("movb %3,%%dh\n\t" \
-	"movb %2,%%dl\n\t" \
-	"shll $16,%%edx\n\t" \
-	"movw %1,%%dx" \
-	:"=&d" (__base) \
-	:"m" (*((addr)+2)), \
-	 "m" (*((addr)+4)), \
-	 "m" (*((addr)+7))); \
-__base;})
-
-#define get_base(ldt) _get_base( ((char *)&(ldt)) )
-
-#define get_limit(segment) ({ \
-unsigned long __limit; \
-__asm__("lsll %1,%0\n\tincl %0":"=r" (__limit):"r" (segment)); \
-__limit;})
+#define PAGE_ALIGN(n) (((n)+0xfff)&~0xfffUL)
 
 #endif
