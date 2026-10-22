@@ -10,3 +10,4 @@ tools/system
 tools/system.bin
 tools/build
 userland/build/
+__pycache__/

@@ -30,14 +30,14 @@ SHIFTED = {'!': '1', '@': '2', '#': '3', '$': '4', '%': '5', '^': '6',
 
 
 class Vm:
-    def __init__(self, image, hd, geom, qemu):
+    def __init__(self, image, hd, geom, qemu, mem):
         self.tmp = tempfile.mkdtemp(prefix='linux001-')
         self.sock = os.path.join(self.tmp, 'monitor')
         disk = os.path.join(self.tmp, 'hd.img')
         shutil.copy(hd, disk)
         cyls, heads, secs = geom
         self.proc = subprocess.Popen(
-            [qemu, '-m', '16', '-display', 'none', '-boot', 'a',
+            [qemu, '-m', mem, '-display', 'none', '-boot', 'a',
              '-drive', 'file=%s,if=floppy,format=raw,readonly=on' % image,
              '-drive', 'file=%s,if=none,id=hd0,format=raw' % disk,
              '-device', 'ide-hd,drive=hd0,bus=ide.0,cyls=%d,heads=%d,secs=%d'
@@ -104,13 +104,16 @@ def main():
     ap.add_argument('--geometry', default='64,16,63', help='cyls,heads,secs')
     ap.add_argument('--bin', default='userland/build/bin',
                     help='staged programs, to work out expected output')
-    ap.add_argument('--qemu', default='qemu-system-i386')
+    ap.add_argument('--qemu', default='qemu-system-x86_64')
+    ap.add_argument('--mem', default='6G',
+                    help='guest memory; over 4G puts processes above 4Gb')
     a = ap.parse_args()
 
     nprogs = len(os.listdir(a.bin))
     shsize = os.path.getsize(os.path.join(a.bin, 'sh'))
     tests = [
         ('uname -s', 'linux .0'),
+        ('uname -m', 'x86_64'),
         ('echo pipe-ok | cat', 'pipe-ok'),
         ('echo one two three | wc -w', '%7d' % 3),
         ('echo redirected > /tmp/f; cat /tmp/f', 'redirected'),
@@ -127,10 +130,13 @@ def main():
         # several processes queueing disk writes at once (hd.c request list)
         ('cp /bin/sh /tmp/w1 & cp /bin/ls /tmp/w2 & sync; sync; echo sync-ok',
          'sync-ok'),
+        # copy-on-write over a fork, and the fpu state of two processes
+        ('memtest 16', 'memtest: ok', 120),
         ('exit 5', lambda l: re.match(r'child \d+ died with code 0500', l)),
     ]
 
-    vm = Vm(a.image, a.hd, [int(x) for x in a.geometry.split(',')], a.qemu)
+    vm = Vm(a.image, a.hd, [int(x) for x in a.geometry.split(',')], a.qemu,
+            a.mem)
     failed = 0
     try:
         prompt = lambda l: l.startswith('[/usr/root]#')
@@ -139,10 +145,12 @@ def main():
             print('\n'.join(l for l in vm.lines() if l))
             return 1
         print('ok   boot to shell prompt')
-        for cmd, expect in tests:
+        for test in tests:
+            cmd, expect = test[:2]
+            timeout = test[2] if len(test) > 2 else 15
             vm.type(cmd + '\n')
             check = expect if callable(expect) else (lambda l, e=expect: l == e)
-            if vm.wait_for(check, 15):
+            if vm.wait_for(check, timeout):
                 print('ok   %s' % cmd)
             else:
                 failed += 1
