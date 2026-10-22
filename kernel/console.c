@@ -71,59 +71,71 @@ static void scrup(void)
 		pos += columns<<1;
 		scr_end += columns<<1;
 		if (scr_end>SCREEN_END) {
-			__asm__("cld\n\t"
+			int __d0, __d1, __d2;
+			__asm__ volatile ("cld\n\t"
 				"rep\n\t"
 				"movsl\n\t"
-				"movl _columns,%1\n\t"
+				"movl %[cols],%0\n\t"
 				"rep\n\t"
 				"stosw"
-				::"a" (0x0720),
-				"c" ((lines-1)*columns>>1),
-				"D" (SCREEN_START),
-				"S" (origin)
-				:"cx","di","si");
+				:"=&c" (__d0),"=&D" (__d1),"=&S" (__d2)
+				:"a" (0x0720),
+				"0" ((lines-1)*columns>>1),
+				"1" (SCREEN_START),
+				"2" (origin),
+				[cols] "m" (columns)
+				:"memory");
 			scr_end -= origin-SCREEN_START;
 			pos -= origin-SCREEN_START;
 			origin = SCREEN_START;
 		} else {
-			__asm__("cld\n\t"
+			int __d0, __d1;
+			__asm__ volatile ("cld\n\t"
 				"rep\n\t"
 				"stosl"
-				::"a" (0x07200720),
-				"c" (columns>>1),
-				"D" (scr_end-(columns<<1))
-				:"cx","di");
+				:"=&c" (__d0),"=&D" (__d1)
+				:"a" (0x07200720),
+				"0" (columns>>1),
+				"1" (scr_end-(columns<<1))
+				:"memory");
 		}
 		set_origin();
 	} else {
-		__asm__("cld\n\t"
+		int __d0, __d1, __d2;
+		__asm__ volatile ("cld\n\t"
 			"rep\n\t"
 			"movsl\n\t"
-			"movl _columns,%%ecx\n\t"
+			"movl %[cols],%%ecx\n\t"
 			"rep\n\t"
 			"stosw"
-			::"a" (0x0720),
-			"c" ((bottom-top-1)*columns>>1),
-			"D" (origin+(columns<<1)*top),
-			"S" (origin+(columns<<1)*(top+1))
-			:"cx","di","si");
+			:"=&c" (__d0),"=&D" (__d1),"=&S" (__d2)
+			:"a" (0x0720),
+			"0" ((bottom-top-1)*columns>>1),
+			"1" (origin+(columns<<1)*top),
+			"2" (origin+(columns<<1)*(top+1)),
+			[cols] "m" (columns)
+			:"memory");
 	}
 }
 
 static void scrdown(void)
 {
-	__asm__("std\n\t"
+	int __d0, __d1, __d2, __d3;
+	__asm__ volatile ("std\n\t"
 		"rep\n\t"
 		"movsl\n\t"
 		"addl $2,%%edi\n\t"	/* %edi has been decremented by 4 */
-		"movl _columns,%%ecx\n\t"
+		"movl %[cols],%%ecx\n\t"
 		"rep\n\t"
-		"stosw"
-		::"a" (0x0720),
-		"c" ((bottom-top-1)*columns>>1),
-		"D" (origin+(columns<<1)*bottom-4),
-		"S" (origin+(columns<<1)*(bottom-1)-4)
-		:"ax","cx","di","si");
+		"stosw\n\t"
+		"cld"
+		:"=&a" (__d0),"=&c" (__d1),"=&D" (__d2),"=&S" (__d3)
+		:"0" (0x0720),
+		"1" ((bottom-top-1)*columns>>1),
+		"2" (origin+(columns<<1)*bottom-4),
+		"3" (origin+(columns<<1)*(bottom-1)-4),
+		[cols] "m" (columns)
+		:"memory");
 }
 
 static void lf(void)
@@ -163,8 +175,9 @@ static void del(void)
 
 static void csi_J(int par)
 {
-	long count __asm__("cx");
-	long start __asm__("di");
+	long count;
+	long start;
+	int __d0, __d1;
 
 	switch (par) {
 		case 0:	/* erase from cursor to end of display */
@@ -182,18 +195,20 @@ static void csi_J(int par)
 		default:
 			return;
 	}
-	__asm__("cld\n\t"
+	__asm__ volatile ("cld\n\t"
 		"rep\n\t"
 		"stosw\n\t"
-		::"c" (count),
-		"D" (start),"a" (0x0720)
-		:"cx","di");
+		:"=&c" (__d0),"=&D" (__d1)
+		:"0" (count),
+		"1" (start),"a" (0x0720)
+		:"memory");
 }
 
 static void csi_K(int par)
 {
-	long count __asm__("cx");
-	long start __asm__("di");
+	long count;
+	long start;
+	int __d0, __d1;
 
 	switch (par) {
 		case 0:	/* erase from cursor to end of line */
@@ -213,12 +228,13 @@ static void csi_K(int par)
 		default:
 			return;
 	}
-	__asm__("cld\n\t"
+	__asm__ volatile ("cld\n\t"
 		"rep\n\t"
 		"stosw\n\t"
-		::"c" (count),
-		"D" (start),"a" (0x0720)
-		:"cx","di");
+		:"=&c" (__d0),"=&D" (__d1)
+		:"0" (count),
+		"1" (start),"a" (0x0720)
+		:"memory");
 }
 
 void csi_m(void)
@@ -385,10 +401,12 @@ void con_write(struct tty_struct * tty)
 						pos -= columns<<1;
 						lf();
 					}
-					__asm__("movb _attr,%%ah\n\t"
+					int __d0;
+					__asm__ volatile ("movb %[attr],%%ah\n\t"
 						"movw %%ax,%1\n\t"
-						::"a" (c),"m" (*(short *)pos)
-						:"ax");
+						:"=&a" (__d0),"=m" (*(short *)pos)
+						:"0" (c),[attr] "m" (attr)
+						:"memory");
 					pos += 2;
 					x++;
 				} else if (c==27)

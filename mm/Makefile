@@ -1,10 +1,4 @@
-CC	=gcc
-CFLAGS	=-O -Wall -fstrength-reduce -fcombine-regs -fomit-frame-pointer \
-	-finline-functions -nostdinc -I../include
-AS	=gas
-AR	=gar
-LD	=gld
-CPP	=gcc -E -nostdinc -I../include
+include ../Makefile.header
 
 .c.o:
 	$(CC) $(CFLAGS) \

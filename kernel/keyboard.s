@@ -34,13 +34,14 @@ _keyboard_interrupt:
 	movl $0x10,%eax
 	mov %ax,%ds
 	mov %ax,%es
-	xorl %al,%al		/* %eax is scan code */
+	xorl %eax,%eax		/* %eax is scan code */
 	inb $0x60,%al
 	cmpb $0xe0,%al
 	je set_e0
 	cmpb $0xe1,%al
 	je set_e1
-	call key_table(,%eax,4)
+	cld
+	call *key_table(,%eax,4)
 	movb $0,e0
 e0_e1:	inb $0x61,%al
 	jmp 1f
@@ -56,6 +57,7 @@ e0_e1:	inb $0x61,%al
 	movb $0x20,%al
 	outb %al,$0x20
 	pushl $0
+	cld
 	call _do_tty_interrupt
 	addl $4,%esp
 	pop %es
@@ -135,9 +137,11 @@ caps:	testb $0x80,mode
 	xorb $0x40,mode
 	orb $0x80,mode
 set_leds:
+	cld
 	call kb_wait
 	movb $0xed,%al		/* set leds command */
 	outb %al,$0x60
+	cld
 	call kb_wait
 	movb leds,%al
 	outb %al,$0x60
@@ -219,6 +223,11 @@ func_table:
 	.long 0x455b5b1b,0x465b5b1b,0x475b5b1b,0x485b5b1b
 	.long 0x495b5b1b,0x4a5b5b1b,0x4b5b5b1b,0x4c5b5b1b
 
+/*
+ * Linus' original maps are for a Finnish keyboard. The modern port
+ * defaults to US; assemble with --defsym KBD_FINNISH=1 for the original.
+ */
+.ifdef KBD_FINNISH
 key_map:
 	.byte 0,27
 	.ascii "1234567890+'"
@@ -250,6 +259,41 @@ shift_map:
 	.byte 0,0,0,0,0,0,0	/* 4F-55 */
 	.byte '>
 	.fill 10,1,0
+
+.else
+key_map:
+	.byte 0,27
+	.ascii "1234567890-="
+	.byte 127,9
+	.ascii "qwertyuiop[]"
+	.byte 10,0
+	.ascii "asdfghjkl;'"
+	.byte '`,0
+	.ascii "\\zxcvbnm,./"
+	.byte 0,'*,0,32		/* 36-39 */
+	.fill 16,1,0		/* 3A-49 */
+	.byte '-,0,0,0,'+	/* 4A-4E */
+	.byte 0,0,0,0,0,0,0	/* 4F-55 */
+	.byte '<
+	.fill 10,1,0
+
+shift_map:
+	.byte 0,27
+	.ascii "!@#$%^&*()_+"
+	.byte 127,9
+	.ascii "QWERTYUIOP{}"
+	.byte 10,0
+	.ascii "ASDFGHJKL:\""
+	.byte '~,0
+	.ascii "|ZXCVBNM<>?"
+	.byte 0,'*,0,32		/* 36-39 */
+	.fill 16,1,0		/* 3A-49 */
+	.byte '-,0,0,0,'+	/* 4A-4E */
+	.byte 0,0,0,0,0,0,0	/* 4F-55 */
+	.byte '>
+	.fill 10,1,0
+
+.endif
 
 alt_map:
 	.byte 0,0
@@ -301,6 +345,7 @@ do_self:
 	orb $0x80,%al
 4:	andl $0xff,%eax
 	xorl %ebx,%ebx
+	cld
 	call put_queue
 none:	ret
 
@@ -402,6 +447,7 @@ kb_wait:
  * controller to pulse the reset-line low.
  */
 reboot:
+	cld
 	call kb_wait
 	movw $0x1234,0x472	/* don't do memory check */
 	movb $0xfc,%al		/* pulse reset and A20 low */

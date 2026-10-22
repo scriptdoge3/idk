@@ -1,79 +1,108 @@
 #
 # Makefile for linux.
-# If you don't have '-mstring-insns' in your gcc (and nobody but me has :-)
-# remove them from the CFLAGS defines.
+#
+# Modern port: builds with a stock GNU toolchain (gcc + binutils) instead
+# of gcc 1.x/gas/gld/as86 under Minix. See Makefile.header for the flags
+# and README.md for how to boot the result in QEMU.
 #
 
-AS86	=as -0 -a
-CC86	=cc -0
-LD86	=ld -0
+include Makefile.header
 
-AS	=gas
-LD	=gld
-LDFLAGS	=-s -x -M
-CC	=gcc
-CFLAGS	=-Wall -O -fstrength-reduce -fomit-frame-pointer -fcombine-regs
-CPP	=gcc -E -nostdinc -Iinclude
+HOSTCC	=cc
+LDFLAGS	=-T tools/system.ld -Map System.map -z noexecstack \
+	$(shell $(LD) --help 2>/dev/null | grep -q no-warn-rwx-segments && echo --no-warn-rwx-segments)
 
 ARCHIVES=kernel/kernel.o mm/mm.o fs/fs.o
 LIBS	=lib/lib.a
 
 .c.s:
 	$(CC) $(CFLAGS) \
-	-nostdinc -Iinclude -S -o $*.s $<
+	-S -o $*.s $<
 .s.o:
-	$(AS) -c -o $*.o $<
+	$(AS) -o $*.o $<
 .c.o:
 	$(CC) $(CFLAGS) \
-	-nostdinc -Iinclude -c -o $*.o $<
+	-c -o $*.o $<
 
 all:	Image
 
-Image: boot/boot tools/system tools/build
-	tools/build boot/boot tools/system > Image
-	sync
+Image: boot/boot tools/system.bin tools/build
+	tools/build boot/boot tools/system.bin > Image
 
 tools/build: tools/build.c
-	$(CC) $(CFLAGS) \
-	-o tools/build tools/build.c
-	chmem +65000 tools/build
+	$(HOSTCC) -O2 -o tools/build tools/build.c
 
 boot/head.o: boot/head.s
 
 tools/system:	boot/head.o init/main.o \
-		$(ARCHIVES) $(LIBS)
+		$(ARCHIVES) $(LIBS) tools/system.ld
 	$(LD) $(LDFLAGS) boot/head.o init/main.o \
 	$(ARCHIVES) \
 	$(LIBS) \
-	-o tools/system > System.map
+	-o tools/system
 
-kernel/kernel.o:
-	(cd kernel; make)
+tools/system.bin: tools/system
+	$(OBJCOPY) -O binary tools/system tools/system.bin
 
-mm/mm.o:
-	(cd mm; make)
+kernel/kernel.o: FORCE
+	$(MAKE) -C kernel
 
-fs/fs.o:
-	(cd fs; make)
+mm/mm.o: FORCE
+	$(MAKE) -C mm
 
-lib/lib.a:
-	(cd lib; make)
+fs/fs.o: FORCE
+	$(MAKE) -C fs
 
-boot/boot:	boot/boot.s tools/system
-	(echo -n "SYSSIZE = (";ls -l tools/system | grep system \
-		| cut -c25-31 | tr '\012' ' '; echo "+ 15 ) / 16") > tmp.s
-	cat boot/boot.s >> tmp.s
-	$(AS86) -o boot/boot.o tmp.s
-	rm -f tmp.s
-	$(LD86) -s -o boot/boot boot/boot.o
+lib/lib.a: FORCE
+	$(MAKE) -C lib
+
+FORCE:
+
+# SYSSIZE is the kernel size in 16-byte clicks, rounded up.
+boot/boot:	boot/boot.s tools/system.bin
+	$(AS) --defsym SYSSIZE=$$(( ($$(stat -c %s tools/system.bin) + 15) / 16 )) \
+		-o boot/boot.o boot/boot.s
+	$(LD) -Ttext 0 -e start --oformat binary -o boot/boot boot/boot.o
+
+#
+# Root file system: a hard disk image with one Minix partition holding
+# /bin/sh and friends (see userland/). The geometry here must match
+# HD_TYPE in include/linux/config.h.
+#
+HD_CYLS	=64
+HD_HEADS=16
+HD_SECS	=63
+
+hd.img: FORCE
+	$(MAKE) -C userland
+	python3 tools/mkrootfs.py --cyls $(HD_CYLS) --heads $(HD_HEADS) \
+		--secs $(HD_SECS) --devices userland/devices \
+		-o hd.img userland/build/rootfs
+
+QEMU	=qemu-system-i386
+QEMUEXTRA=
+QEMUFLAGS=-m 16 -boot a $(QEMUEXTRA) -drive file=Image,if=floppy,format=raw \
+	-drive file=hd.img,if=none,id=hd0,format=raw \
+	-device ide-hd,drive=hd0,bus=ide.0,cyls=$(HD_CYLS),heads=$(HD_HEADS),secs=$(HD_SECS)
+
+run: Image hd.img
+	$(QEMU) $(QEMUFLAGS)
+
+run-curses: Image hd.img
+	$(QEMU) $(QEMUFLAGS) -display curses
+
+test: Image hd.img
+	python3 tools/smoketest.py --qemu $(QEMU) \
+		--geometry $(HD_CYLS),$(HD_HEADS),$(HD_SECS)
 
 clean:
-	rm -f Image System.map tmp_make boot/boot core
-	rm -f init/*.o boot/*.o tools/system tools/build
-	(cd mm;make clean)
-	(cd fs;make clean)
-	(cd kernel;make clean)
-	(cd lib;make clean)
+	rm -f Image System.map tmp_make boot/boot core hd.img
+	rm -f init/*.o boot/*.o tools/system tools/system.bin tools/build
+	$(MAKE) -C mm clean
+	$(MAKE) -C fs clean
+	$(MAKE) -C kernel clean
+	$(MAKE) -C lib clean
+	$(MAKE) -C userland clean
 
 backup: clean
 	(cd .. ; tar cf - linux | compress16 - > backup.Z)
@@ -86,6 +115,8 @@ dep:
 	(cd fs; make dep)
 	(cd kernel; make dep)
 	(cd mm; make dep)
+
+.PHONY: all run run-curses test clean backup dep FORCE
 
 ### Dependencies:
 init/main.o : init/main.c include/unistd.h include/sys/stat.h \

@@ -49,15 +49,15 @@ nr_system_calls = 67
 
 .globl _system_call,_sys_fork,_timer_interrupt,_hd_interrupt,_sys_execve
 
-.align 2
+.p2align 2
 bad_sys_call:
 	movl $-1,%eax
 	iret
-.align 2
+.p2align 2
 reschedule:
 	pushl $ret_from_sys_call
 	jmp _schedule
-.align 2
+.p2align 2
 _system_call:
 	cmpl $nr_system_calls-1,%eax
 	ja bad_sys_call
@@ -72,7 +72,8 @@ _system_call:
 	mov %dx,%es
 	movl $0x17,%edx		# fs points to local data space
 	mov %dx,%fs
-	call _sys_call_table(,%eax,4)
+	cld
+	call *_sys_call_table(,%eax,4)
 	pushl %eax
 	movl _current,%eax
 	cmpl $0,state(%eax)		# state
@@ -106,6 +107,7 @@ ret_from_sys_call:
 	pushl %ecx
 	pushl $28
 	pushl %edx
+	cld
 	call _verify_area
 	popl %edx
 	addl $4,%esp
@@ -137,11 +139,12 @@ default_signal:
 	cmpl $SIG_CHLD,%ecx
 	je 2b
 	pushl %ecx
+	cld
 	call _do_exit		# remember to set bit 7 when dumping core
 	addl $4,%esp
 	jmp 3b
 
-.align 2
+.p2align 2
 _timer_interrupt:
 	push %ds		# save ds,es and put kernel data space
 	push %es		# into them. %fs is used by _system_call
@@ -161,20 +164,23 @@ _timer_interrupt:
 	movl CS(%esp),%eax
 	andl $3,%eax		# %eax is CPL (0 or 3, 0=supervisor)
 	pushl %eax
+	cld
 	call _do_timer		# 'do_timer(long CPL)' does everything from
 	addl $4,%esp		# task switching to accounting ...
 	jmp ret_from_sys_call
 
-.align 2
+.p2align 2
 _sys_execve:
 	lea EIP(%esp),%eax
 	pushl %eax
+	cld
 	call _do_execve
 	addl $4,%esp
 	ret
 
-.align 2
+.p2align 2
 _sys_fork:
+	cld
 	call _find_empty_process
 	testl %eax,%eax
 	js 1f
@@ -183,6 +189,7 @@ _sys_fork:
 	pushl %edi
 	pushl %ebp
 	pushl %eax
+	cld
 	call _copy_process
 	addl $20,%esp
 1:	ret

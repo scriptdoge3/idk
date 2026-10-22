@@ -18,16 +18,19 @@ extern int sys_close(int fd);
  */
 #define MAX_ARG_PAGES 32
 
-#define cp_block(from,to) \
-__asm__("pushl $0x10\n\t" \
+#define cp_block(from,to) do { \
+int __d0, __d1, __d2; \
+__asm__ volatile ("pushl $0x10\n\t" \
 	"pushl $0x17\n\t" \
 	"pop %%es\n\t" \
 	"cld\n\t" \
 	"rep\n\t" \
 	"movsl\n\t" \
 	"pop %%es" \
-	::"c" (BLOCK_SIZE/4),"S" (from),"D" (to) \
-	:"cx","di","si")
+	:"=&c" (__d0),"=&S" (__d1),"=&D" (__d2) \
+	:"0" (BLOCK_SIZE/4),"1" (from),"2" (to) \
+	:"memory"); \
+} while (0)
 
 /*
  * read_head() reads blocks 1-6 (not 0). Block 0 has already been

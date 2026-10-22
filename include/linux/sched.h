@@ -158,7 +158,7 @@ __asm__("str %%ax\n\t" \
 	"subl %2,%%eax\n\t" \
 	"shrl $4,%%eax" \
 	:"=a" (n) \
-	:"a" (0),"i" (FIRST_TSS_ENTRY<<3))
+	:"0" (0),"i" (FIRST_TSS_ENTRY<<3))
 /*
  *	switch_to(n) should switch tasks to task nr n, first
  * checking that n isn't the current task, in which case it does nothing.
@@ -167,43 +167,51 @@ __asm__("str %%ax\n\t" \
  */
 #define switch_to(n) {\
 struct {long a,b;} __tmp; \
-__asm__("cmpl %%ecx,_current\n\t" \
+long __d0, __d1; \
+__asm__ volatile ("cmpl %%ecx,_current\n\t" \
 	"je 1f\n\t" \
 	"xchgl %%ecx,_current\n\t" \
 	"movw %%dx,%1\n\t" \
-	"ljmp %0\n\t" \
-	"cmpl %%ecx,%2\n\t" \
+	"ljmp *%0\n\t" \
+	"cmpl %%ecx,%4\n\t" \
 	"jne 1f\n\t" \
 	"clts\n" \
 	"1:" \
-	::"m" (*&__tmp.a),"m" (*&__tmp.b), \
-	"m" (last_task_used_math),"d" _TSS(n),"c" ((long) task[n])); \
+	:"=m" (__tmp.a),"=m" (__tmp.b),"=d" (__d0),"=c" (__d1) \
+	:"m" (last_task_used_math),"2" _TSS(n),"3" ((long) task[n]) \
+	:"memory"); \
 }
 
 #define PAGE_ALIGN(n) (((n)+0xfff)&0xfffff000)
 
-#define _set_base(addr,base) \
-__asm__("movw %%dx,%0\n\t" \
+#define _set_base(addr,base) do { \
+long __d0; \
+__asm__ volatile ("movw %%dx,%0\n\t" \
 	"rorl $16,%%edx\n\t" \
 	"movb %%dl,%1\n\t" \
 	"movb %%dh,%2" \
-	::"m" (*((addr)+2)), \
-	  "m" (*((addr)+4)), \
-	  "m" (*((addr)+7)), \
-	  "d" (base) \
-	:"dx")
+	:"=m" (*((addr)+2)), \
+	 "=m" (*((addr)+4)), \
+	 "=m" (*((addr)+7)), \
+	 "=d" (__d0) \
+	:"3" (base) \
+	:"memory"); \
+} while (0)
 
-#define _set_limit(addr,limit) \
-__asm__("movw %%dx,%0\n\t" \
+#define _set_limit(addr,limit) do { \
+long __d0; \
+__asm__ volatile ("movw %%dx,%0\n\t" \
 	"rorl $16,%%edx\n\t" \
 	"movb %1,%%dh\n\t" \
 	"andb $0xf0,%%dh\n\t" \
 	"orb %%dh,%%dl\n\t" \
 	"movb %%dl,%1" \
-	::"m" (*(addr)), \
-	  "m" (*((addr)+6)), \
-	  "d" (limit) \
-	:"dx")
+	:"=m" (*(addr)), \
+	 "+m" (*((addr)+6)), \
+	 "=d" (__d0) \
+	:"2" (limit) \
+	:"memory"); \
+} while (0)
 
 #define set_base(ldt,base) _set_base( ((char *)&(ldt)) , base )
 #define set_limit(ldt,limit) _set_limit( ((char *)&(ldt)) , (limit-1)>>12 )
@@ -214,7 +222,7 @@ __asm__("movb %3,%%dh\n\t" \
 	"movb %2,%%dl\n\t" \
 	"shll $16,%%edx\n\t" \
 	"movw %1,%%dx" \
-	:"=d" (__base) \
+	:"=&d" (__base) \
 	:"m" (*((addr)+2)), \
 	 "m" (*((addr)+4)), \
 	 "m" (*((addr)+7))); \

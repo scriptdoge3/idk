@@ -7,6 +7,7 @@
  */
 .text
 .globl _idt,_gdt,_pg_dir
+.globl startup_32
 _pg_dir:
 startup_32:
 	movl $0x10,%eax
@@ -102,7 +103,7 @@ L6:
 				# just in case, we know what happens.
 
 /* This is the default interrupt "handler" :-) */
-.align 2
+.p2align 2
 ignore_int:
 	incb 0xb8000+160		# put something on the screen
 	movb $2,0xb8000+161		# so that we know something
@@ -133,7 +134,7 @@ ignore_int:
  * some kind of marker at them (search for "8Mb"), but I
  * won't guarantee that's all :-( )
  */
-.align 2
+.p2align 2
 setup_paging:
 	movl $1024*3,%ecx
 	xorl %eax,%eax
@@ -147,6 +148,7 @@ setup_paging:
 1:	stosl			/* fill pages backwards - more efficient :-) */
 	subl $0x1000,%eax
 	jge 1b
+	cld			/* gcc-compiled code expects DF=0 */
 	xorl %eax,%eax		/* pg_dir is at 0x0000 */
 	movl %eax,%cr3		/* cr3 - page directory start */
 	movl %cr0,%eax
@@ -154,18 +156,18 @@ setup_paging:
 	movl %eax,%cr0		/* set paging (PG) bit */
 	ret			/* this also flushes prefetch-queue */
 
-.align 2
+.p2align 2
 .word 0
 idt_descr:
 	.word 256*8-1		# idt contains 256 entries
 	.long _idt
-.align 2
+.p2align 2
 .word 0
 gdt_descr:
 	.word 256*8-1		# so does gdt (not that that's any
 	.long _gdt		# magic number, but it works for me :^)
 
-	.align 3
+	.p2align 3
 _idt:	.fill 256,8,0		# idt is uninitialized
 
 _gdt:	.quad 0x0000000000000000	/* NULL descriptor */

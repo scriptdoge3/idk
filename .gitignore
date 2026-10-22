@@ -1,0 +1,12 @@
+# build products
+*.o
+*.a
+Image
+System.map
+hd.img
+tmp_make
+boot/boot
+tools/system
+tools/system.bin
+tools/build
+userland/build/

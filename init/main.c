@@ -14,10 +14,16 @@
  * won't be any messing with the stack from main(), but we define
  * some others too.
  */
-static inline _syscall0(int,fork)
-static inline _syscall0(int,pause)
+/*
+ * Modern port: "static" after the prototypes in unistd.h is now an error,
+ * and plain "inline" is only a hint. extern inline + always_inline gets
+ * back what this needs: inlined, never called.
+ */
+#define __always_inline extern inline __attribute__((always_inline))
+__always_inline _syscall0(int,fork)
+__always_inline _syscall0(int,pause)
 static inline _syscall0(int,setup)
-static inline _syscall0(int,sync)
+__always_inline _syscall0(int,sync)
 
 #include <linux/tty.h>
 #include <linux/sched.h>
@@ -64,7 +70,7 @@ static void time_init(void)
 		time.tm_min = CMOS_READ(2);
 		time.tm_hour = CMOS_READ(4);
 		time.tm_mday = CMOS_READ(7);
-		time.tm_mon = CMOS_READ(8)-1;
+		time.tm_mon = CMOS_READ(8);
 		time.tm_year = CMOS_READ(9);
 	} while (time.tm_sec != CMOS_READ(0));
 	BCD_TO_BIN(time.tm_sec);
@@ -72,7 +78,10 @@ static void time_init(void)
 	BCD_TO_BIN(time.tm_hour);
 	BCD_TO_BIN(time.tm_mday);
 	BCD_TO_BIN(time.tm_mon);
+	time.tm_mon--;			/* after BCD_TO_BIN: 0x10-1 isn't 9 */
 	BCD_TO_BIN(time.tm_year);
+	if (time.tm_year < 70)		/* the CMOS only has two digits: Y2K */
+		time.tm_year += 100;
 	startup_time = kernel_mktime(&time);
 }
 
@@ -119,7 +128,7 @@ static char * envp[] = { "HOME=/usr/root", NULL };
 
 void init(void)
 {
-	int i,j;
+	int i,j,pid;
 
 	setup();
 	if (!fork())
@@ -130,18 +139,25 @@ void init(void)
 	printf("%d buffers = %d bytes buffer space\n\r",NR_BUFFERS,
 		NR_BUFFERS*BLOCK_SIZE);
 	printf(" Ok.\n\r");
-	if ((i=fork())<0)
-		printf("Fork failed in init\r\n");
-	else if (!i) {
-		close(0);close(1);close(2);
-		setsid();
-		(void) open("/dev/tty0",O_RDWR,0);
-		(void) dup(0);
-		(void) dup(0);
-		_exit(execve("/bin/sh",argv,envp));
+/*
+ * Modern port: like Linux 0.11, start a new shell when the old one
+ * exits instead of leaving a dead machine.
+ */
+	for (;;) {
+		if ((pid=fork())<0) {
+			printf("Fork failed in init\r\n");
+			continue;
+		} else if (!pid) {
+			close(0);close(1);close(2);
+			setsid();
+			(void) open("/dev/tty0",O_RDWR,0);
+			(void) dup(0);
+			(void) dup(0);
+			_exit(execve("/bin/sh",argv,envp));
+		}
+		while ((j=wait(&i)) != pid && j != -1)
+			/* e.g. /bin/update */ ;
+		printf("child %d died with code %04x\n\r",j,i);
+		sync();
 	}
-	j=wait(&i);
-	printf("child %d died with code %04x\n",j,i);
-	sync();
-	_exit(0);	/* NOTE! _exit, not exit() */
 }

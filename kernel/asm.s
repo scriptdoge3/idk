@@ -30,6 +30,7 @@ no_error_code:
 	mov %dx,%ds
 	mov %dx,%es
 	mov %dx,%fs
+	cld
 	call *%eax
 	addl $8,%esp
 	pop %fs
@@ -86,6 +87,7 @@ _device_not_available:
 	push %ds
 	movl $0x10,%eax
 	mov %ax,%ds
+	cld
 	call _math_state_restore
 	pop %ds
 	popl %edx
@@ -125,6 +127,7 @@ error_code:
 	mov %ax,%ds
 	mov %ax,%es
 	mov %ax,%fs
+	cld
 	call *%ebx
 	addl $8,%esp
 	pop %fs

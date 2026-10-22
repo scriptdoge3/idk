@@ -45,7 +45,7 @@ struct {
 void math_state_restore()
 {
 	if (last_task_used_math)
-		__asm__("fnsave %0"::"m" (last_task_used_math->tss.i387));
+		__asm__ volatile ("fnsave %0":"=m" (last_task_used_math->tss.i387));
 	if (current->used_math)
 		__asm__("frstor %0"::"m" (current->tss.i387));
 	else {

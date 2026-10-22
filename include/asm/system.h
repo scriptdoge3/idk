@@ -11,24 +11,27 @@ __asm__ ("movl %%esp,%%eax\n\t" \
 	"movw %%ax,%%es\n\t" \
 	"movw %%ax,%%fs\n\t" \
 	"movw %%ax,%%gs" \
-	:::"ax")
+	:::"ax","memory")
 
-#define sti() __asm__ ("sti"::)
-#define cli() __asm__ ("cli"::)
+#define sti() __asm__ volatile ("sti":::"memory")
+#define cli() __asm__ volatile ("cli":::"memory")
 #define nop() __asm__ ("nop"::)
 
 #define iret() __asm__ ("iret"::)
 
-#define _set_gate(gate_addr,type,dpl,addr) \
-__asm__ ("movw %%dx,%%ax\n\t" \
-	"movw %0,%%dx\n\t" \
-	"movl %%eax,%1\n\t" \
-	"movl %%edx,%2" \
-	: \
+#define _set_gate(gate_addr,type,dpl,addr) do { \
+long __d0, __d1; \
+__asm__ volatile ("movw %%dx,%%ax\n\t" \
+	"movw %4,%%dx\n\t" \
+	"movl %%eax,%0\n\t" \
+	"movl %%edx,%1" \
+	: "=o" (*((char *) (gate_addr))), \
+	"=o" (*(4+(char *) (gate_addr))), \
+	"=d" (__d0),"=a" (__d1) \
 	: "i" ((short) (0x8000+(dpl<<13)+(type<<8))), \
-	"o" (*((char *) (gate_addr))), \
-	"o" (*(4+(char *) (gate_addr))), \
-	"d" ((char *) (addr)),"a" (0x00080000))
+	"2" ((char *) (addr)),"3" (0x00080000) \
+	: "memory"); \
+} while (0)
 
 #define set_intr_gate(n,addr) \
 	_set_gate(&idt[n],14,0,addr)
@@ -60,7 +63,7 @@ __asm__ ("movw $104,%1\n\t" \
 	"rorl $16,%%eax" \
 	::"a" (addr), "m" (*(n)), "m" (*(n+2)), "m" (*(n+4)), \
 	 "m" (*(n+5)), "m" (*(n+6)), "m" (*(n+7)) \
-	)
+	:"memory")
 
 #define set_tss_desc(n,addr) _set_tssldt_desc(((char *) (n)),addr,"0x89")
 #define set_ldt_desc(n,addr) _set_tssldt_desc(((char *) (n)),addr,"0x82")

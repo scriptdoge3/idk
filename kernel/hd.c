@@ -65,11 +65,19 @@ static void rw_abs_hd(int rw,unsigned int nr,unsigned int sec,unsigned int head,
 	unsigned int cyl,struct buffer_head * bh);
 void hd_init(void);
 
-#define port_read(port,buf,nr) \
-__asm__("cld;rep;insw"::"d" (port),"D" (buf),"c" (nr):"cx","di")
+#define port_read(port,buf,nr) do { \
+int __d0, __d1; \
+__asm__ volatile ("cld;rep;insw" \
+	:"=&D" (__d0),"=&c" (__d1) \
+	:"d" (port),"0" (buf),"1" (nr):"memory"); \
+} while (0)
 
-#define port_write(port,buf,nr) \
-__asm__("cld;rep;outsw"::"d" (port),"S" (buf),"c" (nr):"cx","si")
+#define port_write(port,buf,nr) do { \
+int __d0, __d1; \
+__asm__ volatile ("cld;rep;outsw" \
+	:"=&S" (__d0),"=&c" (__d1) \
+	:"d" (port),"0" (buf),"1" (nr):"memory"); \
+} while (0)
 
 extern void hd_interrupt(void);
 
@@ -182,6 +190,11 @@ static void hd_out(unsigned int drive,unsigned int nsect,unsigned int sect,
 
 	if (drive>1 || head>15)
 		panic("Trying to write bad sector");
+/*
+ * Modern port: IDE status is per drive, and the BIOS may have left the
+ * other one (possibly absent, reading as 0) selected. Select ours first.
+ */
+	outb_p(0xA0|(drive<<4)|head,HD_CURRENT);
 	if (!controller_ready())
 		panic("HD controller not ready");
 	do_hd = intr_addr;
@@ -205,7 +218,7 @@ static int drive_busy(void)
 			break;
 	i = inb(HD_STATUS);
 	i &= BUSY_STAT | READY_STAT | SEEK_STAT;
-	if (i == READY_STAT | SEEK_STAT)
+	if (i == (READY_STAT | SEEK_STAT))
 		return(0);
 	printk("HD controller times out\n\r");
 	return(1);
@@ -228,7 +241,8 @@ static void reset_controller(void)
 static void reset_hd(int nr)
 {
 	reset_controller();
-	hd_out(nr,_SECT,_SECT,_HEAD-1,_CYL,WIN_SPECIFY,&do_request);
+	hd_out(nr,hd_info[nr].sect,hd_info[nr].sect,hd_info[nr].head-1,
+		hd_info[nr].cyl,WIN_SPECIFY,&do_request);
 }
 
 void unexpected_hd_interrupt(void)

@@ -1,0 +1,31 @@
+#
+# Toolchain settings shared by all the Makefiles.
+#
+# The original build used gcc 1.x, gas/gld (a.out) and Bruce Evans' as86
+# under Minix. This builds with a stock 32-bit capable GNU toolchain
+# (gcc + binutils) producing ELF, which is then flattened to a raw image.
+#
+# -fleading-underscore keeps the a.out convention of prefixing C symbols
+# with '_', so the hand-written assembly (which calls _main, _schedule,
+# _current, ...) links without being rewritten.
+#
+
+TOPDIR	:= $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
+
+AS	=as --32 --noexecstack
+LD	=ld -m elf_i386
+AR	=ar
+CC	=gcc
+OBJCOPY	=objcopy
+
+CFLAGS	=-m32 -march=i386 -O1 -std=gnu89 \
+	-ffreestanding -fno-builtin -nostdinc -I$(TOPDIR)/include \
+	-fno-pic -fno-pie -fno-stack-protector -fcommon \
+	-fcf-protection=none -fno-stack-clash-protection \
+	-fomit-frame-pointer -fleading-underscore \
+	-fno-strict-aliasing -fno-optimize-sibling-calls \
+	-fno-tree-loop-distribute-patterns \
+	-fno-asynchronous-unwind-tables -fno-unwind-tables \
+	-mno-mmx -mno-sse -mpreferred-stack-boundary=2 \
+	-w
+CPP	=gcc -E -nostdinc -I$(TOPDIR)/include

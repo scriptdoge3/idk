@@ -2,14 +2,21 @@
 #define _CONFIG_H
 
 /* #define LASU_HD */
-#define LINUS_HD
+/* #define LINUS_HD */
+
+/*
+ * Modern port: a single emulated IDE disk (see the Makefile, which
+ * builds hd.img and tells QEMU this exact geometry). The root file
+ * system lives in its first partition.
+ */
+#define QEMU_HD
 
 /*
  * Amount of ram memory (in bytes, 640k-1M not discounted). Currently 8Mb.
  * Don't make this bigger without making sure that there are enough page
  * directory entries (boot/head.s)
  */
-#if	defined(LINUS_HD)
+#if	defined(LINUS_HD) || defined(QEMU_HD)
 #define HIGH_MEMORY (0x800000)
 #elif	defined(LASU_HD)
 #define HIGH_MEMORY (0x400000)
@@ -25,7 +32,9 @@
 #endif
 
 /* Root device at bootup. */
-#if	defined(LINUS_HD)
+#if	defined(QEMU_HD)
+#define ROOT_DEV 0x301
+#elif	defined(LINUS_HD)
 #define ROOT_DEV 0x306
 #elif	defined(LASU_HD)
 #define ROOT_DEV 0x302
@@ -42,7 +51,9 @@
  * more than 8 heads, but that is what the bios-listings seem to imply. I
  * just love not having a manual.
  */
-#if	defined(LASU_HD)
+#if	defined(QEMU_HD)
+#define HD_TYPE { 16,63,64,65535,64,8 }
+#elif	defined(LASU_HD)
 #define HD_TYPE { 7,35,915,65536,920,0 }
 #elif	defined(LINUS_HD)
 #define HD_TYPE { 5,17,980,300,980,0 },{ 5,17,980,300,980,0 }
