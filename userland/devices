@@ -1,0 +1,11 @@
+# Device nodes for the root file system (tools/mkrootfs.py --devices).
+# path		type	major	minor	mode
+/dev/tty0	c	4	0	0622	# the console
+/dev/tty1	c	4	1	0622	# COM1
+/dev/tty2	c	4	2	0622	# COM2
+/dev/tty	c	5	0	0666	# controlling terminal
+/dev/hd0	b	3	0	0600	# whole disk
+/dev/hd1	b	3	1	0600	# first partition (root)
+/dev/hd2	b	3	2	0600
+/dev/hd3	b	3	3	0600
+/dev/hd4	b	3	4	0600

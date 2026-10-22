@@ -1,0 +1,9 @@
+
+Welcome to Linux 0.01 (1991), running on a modern toolchain.
+
+Try: ls -l /bin    cat /etc/motd    echo hi > f; cat f    uname -a
+     help          ls / | wc        mkdir d; cd d; pwd    date
+
+Files are written back to disk by /bin/update every 30s; run 'sync'
+before you quit QEMU if you want your changes kept.
+
