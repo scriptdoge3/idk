@@ -13,6 +13,12 @@
  * (to put a word in video IO), but this will work even for keyboard
  * interrupts. We know interrupts aren't enabled when getting a keyboard
  * interrupt, as we use trap-gates. Hopefully all is well.
+ *
+ * Modern port: trap gates leave interrupts *on*; it is interrupt gates
+ * that turn them off. So the keyboard now uses an interrupt gate, and
+ * con_write() runs with interrupts off - it is called both by processes
+ * and by the keyboard interrupt (echo), and two of them interleaving
+ * corrupted the cursor state.
  */
 
 #include <linux/sched.h>
@@ -56,12 +62,15 @@ static inline void gotoxy(unsigned int new_x,unsigned int new_y)
 
 static inline void set_origin(void)
 {
+	unsigned long flags;
+
+	save_flags(flags);
 	cli();
 	outb_p(12,0x3d4);
 	outb_p(0xff&((origin-SCREEN_START)>>9),0x3d5);
 	outb_p(13,0x3d4);
 	outb_p(0xff&((origin-SCREEN_START)>>1),0x3d5);
-	sti();
+	restore_flags(flags);
 }
 
 static void scrup(void)
@@ -253,12 +262,15 @@ void csi_m(void)
 
 static inline void set_cursor(void)
 {
+	unsigned long flags;
+
+	save_flags(flags);
 	cli();
 	outb_p(14,0x3d4);
 	outb_p(0xff&((pos-SCREEN_START)>>9),0x3d5);
 	outb_p(15,0x3d4);
 	outb_p(0xff&((pos-SCREEN_START)>>1),0x3d5);
-	sti();
+	restore_flags(flags);
 }
 
 static void respond(struct tty_struct * tty)
@@ -389,7 +401,10 @@ void con_write(struct tty_struct * tty)
 {
 	int nr;
 	char c;
+	unsigned long flags;
 
+	save_flags(flags);
+	cli();
 	nr = CHARS(tty->write_q);
 	while (nr--) {
 		GETCH(tty->write_q,c);
@@ -546,6 +561,7 @@ void con_write(struct tty_struct * tty)
 		}
 	}
 	set_cursor();
+	restore_flags(flags);
 }
 
 /*
@@ -560,7 +576,7 @@ void con_init(void)
 	register unsigned char a;
 
 	gotoxy(*(unsigned char *)(0x90000+510),*(unsigned char *)(0x90000+511));
-	set_trap_gate(0x21,&keyboard_interrupt);
+	set_intr_gate(0x21,&keyboard_interrupt);
 	outb_p(inb_p(0x21)&0xfd,0x21);
 	a=inb_p(0x61);
 	outb_p(a|0x80,0x61);

@@ -15,6 +15,8 @@ __asm__ ("movl %%esp,%%eax\n\t" \
 
 #define sti() __asm__ volatile ("sti":::"memory")
 #define cli() __asm__ volatile ("cli":::"memory")
+#define save_flags(x) __asm__ volatile ("pushfl ; popl %0":"=r" (x)::"memory")
+#define restore_flags(x) __asm__ volatile ("pushl %0 ; popfl"::"r" (x):"memory")
 #define nop() __asm__ ("nop"::)
 
 #define iret() __asm__ ("iret"::)

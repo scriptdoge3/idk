@@ -225,8 +225,11 @@ int tty_read(unsigned channel, char * buf, int nr)
 		}
 		do {
 			GETCH(tty->secondary,c);
-			if (c==EOF_CHAR(tty) || c==10)
+			if (c==EOF_CHAR(tty) || c==10) {
+				cli();	/* the keyboard interrupt does ++ */
 				tty->secondary.data--;
+				sti();
+			}
 			if (c==EOF_CHAR(tty) && L_CANON(tty))
 				return (b-buf);
 			else {

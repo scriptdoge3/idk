@@ -211,7 +211,8 @@ _hd_interrupt:
 	jmp 1f			# give port chance to breathe
 1:	jmp 1f
 1:	outb %al,$0xA0		# same to controller #2
-	movl _do_hd,%eax
+	xorl %eax,%eax
+	xchgl _do_hd,%eax	# take the handler, leaving NULL behind
 	testl %eax,%eax
 	jne 1f
 	movl $_unexpected_hd_interrupt,%eax

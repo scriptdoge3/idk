@@ -55,9 +55,9 @@ static struct hd_request {
 ((s1)->head<(s2)->head || (s1)->head==(s2)->head && \
 ((s1)->sector<(s2)->sector))))
 
-static struct hd_request * this_request = NULL;
+static struct hd_request * volatile this_request = NULL;
 
-static int sorting=0;
+static volatile int sorting=0;
 
 static void do_request(void);
 static void reset_controller(void);
@@ -161,7 +161,14 @@ int sys_setup(void)
  * This is the pointer to a routine to be executed at every hd-interrupt.
  * Interesting way of doing things, but should be rather practical.
  */
-void (*do_hd)(void) = NULL;
+/*
+ * Modern port: hd_interrupt clears this before calling it (as in Linux
+ * 0.11), and the handlers re-arm it when they expect another interrupt.
+ * Otherwise a request finishing while add_request() was sorting left a
+ * stale pointer here, add_request() thought the disk was still busy,
+ * and nothing ever restarted the queue.
+ */
+void (* volatile do_hd)(void) = NULL;
 
 static int controller_ready(void)
 {
@@ -273,8 +280,10 @@ static void read_intr(void)
 	port_read(HD_DATA,this_request->bh->b_data+
 		512*(this_request->nsector&1),256);
 	this_request->errors = 0;
-	if (--this_request->nsector)
+	if (--this_request->nsector) {
+		do_hd = &read_intr;
 		return;
+	}
 	this_request->bh->b_uptodate = 1;
 	this_request->bh->b_dirt = 0;
 	wake_up(&wait_for_request);
@@ -291,6 +300,7 @@ static void write_intr(void)
 		return;
 	}
 	if (--this_request->nsector) {
+		do_hd = &write_intr;
 		port_write(HD_DATA,this_request->bh->b_data+512,256);
 		return;
 	}
@@ -375,8 +385,10 @@ static void add_request(struct hd_request * req)
  * also never have started, if this is the first request in the queue,
  * so we restart them if necessary.
  */
+	cli();
 	if (!do_hd)
 		do_request();
+	sti();
 }
 
 void rw_abs_hd(int rw,unsigned int nr,unsigned int sec,unsigned int head,
@@ -421,7 +433,7 @@ void hd_init(void)
 		hd[i*5].nr_sects = hd_info[i].head*
 				hd_info[i].sect*hd_info[i].cyl;
 	}
-	set_trap_gate(0x2E,&hd_interrupt);
+	set_intr_gate(0x2E,&hd_interrupt);
 	outb_p(inb_p(0x21)&0xfb,0x21);
 	outb(inb_p(0xA1)&0xbf,0xA1);
 }
