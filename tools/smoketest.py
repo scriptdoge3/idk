@@ -124,6 +124,9 @@ def main():
         ('ls /bin | wc -l', '%7d' % nprogs),
         ('cat /bin/sh /bin/sh /bin/sh /bin/sh | wc -c', '%7d' % (4 * shsize)),
         ('cp /bin/sh /tmp/sh2 && cmp=$? && echo "cp=$cmp"', 'cp=0'),
+        # several processes queueing disk writes at once (hd.c request list)
+        ('cp /bin/sh /tmp/w1 & cp /bin/ls /tmp/w2 & sync; sync; echo sync-ok',
+         'sync-ok'),
         ('exit 5', lambda l: re.match(r'child \d+ died with code 0500', l)),
     ]
 

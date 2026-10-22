@@ -360,7 +360,13 @@ static void add_request(struct hd_request * req)
  * and not this_request->next, as it can be assigned to this_request).
  * This is not too high a price to pay for the ability of not
  * disabling interrupts.
+ *
+ * Modern port: it does touch this_request->next (the !tmp->next case
+ * below). If this_request completes right then, req is chained onto a
+ * finished request and lost, and its owner sleeps forever. Disable
+ * interrupts instead, as later Linux versions do.
  */
+	cli();
 	sorting=1;
 	if (!(tmp=this_request))
 		this_request=req;
@@ -385,7 +391,6 @@ static void add_request(struct hd_request * req)
  * also never have started, if this is the first request in the queue,
  * so we restart them if necessary.
  */
-	cli();
 	if (!do_hd)
 		do_request();
 	sti();

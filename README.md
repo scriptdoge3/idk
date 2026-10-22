@@ -112,6 +112,13 @@ All of the kernel's asm got correct constraints:
   October to December.
 - The `drive_busy` precedence bug and the `WIFEXITED` missing parenthesis
   are fixed.
+- Interrupt races that modern gcc made easier to hit:
+  - The disk request queue could lose a request and hang the system.
+  - Keyboard echo could garble console output. The code assumed trap gates
+    disable interrupts; they don't.
+  - The tty line counter had an unprotected update.
+  
+  These are fixed as in later Linux versions.
 
 **Small quality-of-life changes:**
 
