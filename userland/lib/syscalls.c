@@ -76,6 +76,7 @@ time_t times(struct tms * t)	{ return SYS1(times,t); }
 int uname(struct utsname * u)	{ return SYS1(uname,u); }
 mode_t umask(mode_t m)		{ return SYS1(umask,m); }
 pid_t setsid(void)		{ return SYS0(setsid); }
+int meminfo(unsigned long * buf)	{ return SYS1(meminfo,buf); }
 
 /* the optional third argument of these is always a long-sized value */
 #define VA3(last) ({ va_list ap; long x; \
@@ -121,19 +122,25 @@ void * sbrk(ptrdiff_t incr)
 }
 
 /*
- * Signals: the kernel calls the handler with a "restorer" as its return
- * address (kernel/system_call.s). The restorer drops the signal number
- * and puts back the registers the kernel saved on the user stack.
+ * Signals: the kernel calls the handler with the signal number in %rdi
+ * and a "restorer" as its return address (kernel/signal.c). The
+ * restorer puts back the registers the kernel saved on the user stack
+ * and irets (in user mode) to where the process was, which restores its
+ * flags and stack pointer as well.
  */
 extern void __sig_restore(void);
 __asm__(".text\n"
 	"__sig_restore:\n\t"
-	"addl $4,%esp\n\t"
-	"popl %eax\n\t"
-	"popl %ecx\n\t"
-	"popl %edx\n\t"
-	"popfl\n\t"
-	"ret");
+	"popq %rax\n\t"
+	"popq %rcx\n\t"
+	"popq %rdx\n\t"
+	"popq %rsi\n\t"
+	"popq %rdi\n\t"
+	"popq %r8\n\t"
+	"popq %r9\n\t"
+	"popq %r10\n\t"
+	"popq %r11\n\t"
+	"iretq");
 
 void (*signal(int sig, void (*fn)(int)))(int)
 {

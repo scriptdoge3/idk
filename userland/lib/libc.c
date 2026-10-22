@@ -99,6 +99,7 @@ int feof(FILE * f)
 }
 
 /* A tiny printf core: %d %i %u %x %X %o %s %c %p %%, '-' '0' width, 'l' */
+#define ARG(ap,l,type) ((l) ? va_arg(ap,unsigned long) : va_arg(ap,unsigned type))
 struct out {
 	char * buf;
 	size_t size, len;
@@ -135,9 +136,9 @@ static void out_pad(struct out * o, const char * s, int len, int width,
 
 static int do_printf(struct out * o, const char * fmt, va_list ap)
 {
-	char tmp[16], * s;
+	char tmp[24], * s;
 	unsigned long u;
-	int left, width, prec, base, neg, len;
+	int left, width, prec, base, neg, len, l;
 	char pad;
 
 	for ( ; *fmt ; fmt++) {
@@ -162,8 +163,9 @@ static int do_printf(struct out * o, const char * fmt, va_list ap)
 			for (fmt++ ; *fmt >= '0' && *fmt <= '9' ; fmt++)
 				prec = prec * 10 + *fmt - '0';
 		}
-		while (*fmt == 'l' || *fmt == 'h')
-			fmt++;
+		for (l = 0 ; *fmt == 'l' || *fmt == 'h' ; fmt++)
+			if (*fmt == 'l')
+				l = 1;
 		base = 0; neg = 0;
 		switch (*fmt) {
 		case 'c':
@@ -180,18 +182,18 @@ static int do_printf(struct out * o, const char * fmt, va_list ap)
 			out_pad(o, s, len, width, left, ' ');
 			break;
 		case 'd': case 'i':
-			u = va_arg(ap, long);
+			u = l ? va_arg(ap, long) : (long) va_arg(ap, int);
 			if ((long) u < 0) {
 				neg = 1;
 				u = -(long) u;
 			}
 			base = 10;
 			break;
-		case 'u': base = 10; u = va_arg(ap, unsigned long); break;
-		case 'o': base = 8;  u = va_arg(ap, unsigned long); break;
-		case 'p': pad = '0'; width = 8;
+		case 'u': base = 10; u = ARG(ap, l, int); break;
+		case 'o': base = 8;  u = ARG(ap, l, int); break;
+		case 'p': pad = '0'; width = 16; l = 1;
 		case 'x': case 'X':
-			base = 16; u = va_arg(ap, unsigned long); break;
+			base = 16; u = ARG(ap, l, int); break;
 		case '\0':
 			fmt--;
 			break;

@@ -21,5 +21,6 @@ int setenv(const char * name, const char * value, int overwrite);
 char * strdup(const char * s);
 char * strerror(int err);
 int abs(int x);
+int meminfo(unsigned long * buf);	/* total, free, top of memory */
 
 #endif

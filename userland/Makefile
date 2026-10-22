@@ -6,21 +6,20 @@
 # the libc headers), plus a few extras in include/ here.
 #
 
-AS	=as --32 --noexecstack
-LD	=ld -m elf_i386
+AS	=as --64 --noexecstack
+LD	=ld -m elf_x86_64
 AR	=ar
 CC	=gcc
-CFLAGS	=-m32 -march=i386 -Os -std=gnu89 \
+CFLAGS	=-m64 -Os -std=gnu89 \
 	-ffreestanding -fno-builtin -nostdinc -Iinclude -I../include \
 	-fno-pic -fno-pie -fno-stack-protector -fcf-protection=none \
 	-fno-asynchronous-unwind-tables -fno-unwind-tables \
-	-mno-mmx -mno-sse -mpreferred-stack-boundary=2 \
 	-Wall -Wno-main -Wno-unused-function
 LDFLAGS	=-T user.ld -z noexecstack \
 	$(shell $(LD) --help 2>/dev/null | grep -q no-warn-rwx-segments && echo --no-warn-rwx-segments)
 
-PROGS	=sh ls cat echo mkdir rmdir rm ln cp mv touch uname date sync \
-	update kill chmod wc sleep clear env hello head
+PROGS	=init sh ls cat echo mkdir rmdir rm ln cp mv touch uname date sync \
+	update kill chmod wc sleep clear env hello head free memtest
 LIBOBJS	=lib/syscalls.o lib/libc.o lib/string.o lib/time.o
 
 all: build/rootfs

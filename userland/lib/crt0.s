@@ -3,16 +3,19 @@
  *
  * execve() (fs/exec.c, create_tables) leaves the stack as
  *	argc, argv, envp
- * which is exactly a cdecl call frame for main(argc, argv, envp)
- * minus the return address.
+ * (64-bit words now), which main(argc, argv, envp) gets in %rdi, %rsi,
+ * %rdx in the 64-bit calling convention, on a 16-byte aligned stack.
  */
 	.text
 	.globl	_start
 _start:
-	movl	8(%esp),%eax
-	movl	%eax,environ
+	movq	(%rsp),%rdi
+	movq	8(%rsp),%rsi
+	movq	16(%rsp),%rdx
+	movq	%rdx,environ
+	andq	$-16,%rsp
 	call	main
-	pushl	%eax
+	movl	%eax,%edi
 	call	exit
 1:	jmp	1b
 

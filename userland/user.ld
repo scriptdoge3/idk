@@ -1,11 +1,11 @@
 /*
- * Linux 0.01 runs every process in its own 64Mb segment starting at
+ * Linux 0.01 runs every process in its own address space starting at
  * virtual address 0, and exec reads the text+data straight there from
  * file offset 1024 (a ZMAGIC a.out). So: everything linked at 0, one
  * contiguous blob, bss last.
  */
-OUTPUT_FORMAT("elf32-i386")
-OUTPUT_ARCH(i386)
+OUTPUT_FORMAT("elf64-x86-64")
+OUTPUT_ARCH(i386:x86-64)
 ENTRY(_start)
 
 SECTIONS
